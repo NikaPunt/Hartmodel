@@ -9,7 +9,8 @@
 ################################################################################
 # load in scripts with all functions
 include("functions_AP.jl")
-cd("C:/Users/nikap/OneDrive/Desktop/code_students")
+
+#cd("C:/Users/nikap/OneDrive/Desktop/code_students")
 # load in data file
 graph = construct_graph("data_vertices_test.dat","data_edges_test.dat",',')
 
