@@ -6,7 +6,7 @@ include("plot_graph.jl")
 
 mutable struct CellulaireAutomaat
     mg::MetaGraph
-    fireList::Array{Int64, 1}
+    fireList::Set{Int64}
 end
 
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
@@ -44,7 +44,8 @@ function coloringGraph(celAutom::CellulaireAutomaat)
     colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
-    for i in celAutom.fireList
+    copiedFireList = collect(celAutom.fireList)
+    for i in range(1, size(copiedFireList, 1))
         membership[i] = 2
     end
     return nodefillc = nodecolor[membership]
@@ -58,18 +59,17 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64)
 end
 
 function updateFireList(celAutom::CellulaireAutomaat)
-    vuurlijst= []
-    for i in range(1,stop=size(celAutom.fireList,1))
-        typeof(vuurlijst)
-        typeof(neighbors(celAutom.mg,celAutom.fireList[i]))
-        vuurlijst = append!(vuurlijst, neighbors(celAutom.mg,celAutom.fireList[i]))
+    vuurlijst= Set{Int64}([])
+    for i in range(1,stop=length(celAutom.fireList))
+        buren = Set{Int64}(neighbors(celAutom.mg, pop!(celAutom.fireList)))
+        union(vuurlijst, buren)
     end
     celAutom.fireList = vuurlijst
 end
 
 function main()
     graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
-    celAutom = CellulaireAutomaat((mg = graph, fireList = [1, 50 ,60, 850])...)
+    celAutom = CellulaireAutomaat((mg = graph, fireList = Set{Int64}([1, 50 ,60, 850]))...)
     plotGraph2(celAutom,0)
     for i in range(1,stop=15)
         updateFireList(celAutom)
