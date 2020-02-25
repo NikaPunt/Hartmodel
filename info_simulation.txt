@@ -1,0 +1,21 @@
+k 8.0
+a 0.15
+ϵ0 0.002
+μ1 0.2
+μ2 0.3
+Ntime 10000
+t_sample 1000
+t_display 1000
+t_display_ecg 4000
+Nnodes 900
+dim 3
+D 20.0
+t_stimulation 1
+"stimulus coord" [0.0, 15.0, 0.0, 5.0, 1.0, 1.0]
+"value of stimulus" 0.9
+"block added?" false
+t_block 1
+"block coord if added" [20.0, 30.0, 0.0, 25.0, 1.0, 1.0]
+"value block" 1.0
+"reaction on?" true
+"diffusion on?" true
