@@ -55,7 +55,7 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64)
     nodefillc = coloringGraph(celAutom)
     loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
     g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc)
-    draw(PNG("frame$i.png", 16cm, 16cm), g1)
+    draw(PNG("plotjes/frame$i.png", 16cm, 16cm), g1)
 end
 
 function updateFireList(celAutom::CellulaireAutomaat)
