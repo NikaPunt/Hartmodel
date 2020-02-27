@@ -6,7 +6,14 @@ include("plot_graph.jl")
 
 mutable struct CellulaireAutomaat
     mg::MetaGraph
-    fireList::Set{Int64}
+    #properties nodes:
+        #1: non-active and can be depolarised -> DI
+        #2: active and can fire in next period -> APD
+        #3: active and can't fire -> APD
+        #4: non-active and can't be depolarised -> DI
+    # tDisp::Int64 #display time
+    # tSamp::Int64 #sample time
+    time::Int64
 end
 
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
@@ -44,39 +51,193 @@ function coloringGraph(celAutom::CellulaireAutomaat)
     colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
-    copiedFireList = collect(celAutom.fireList)
-    for i in range(1, size(copiedFireList, 1))
-        membership[i] = 2
+    for node in filter_vertices(celAutom.mg,:state,2)
+        membership[node]=2
+    end
+    for node in filter_vertices(celAutom.mg,:state,3)
+        membership[node]=3
     end
     return nodefillc = nodecolor[membership]
 end
+function coloringEdge(celAutom::CellulaireAutomaat)
 
-function plotGraph2(celAutom::CellulaireAutomaat,i::Int64)
-    nodefillc = coloringGraph(celAutom)
-    loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-    g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc)
-    draw(PNG("plotjes/frame$i.png", 16cm, 16cm), g1)
+    #ne = number of edges
+    colors = [colorant"white" for i in 1:ne(celAutom.mg)]
+
+    j = 0
+    for edge in collect(edges(celAutom.mg))
+        j += 1
+        dx = 1# get_prop(celAutom.mg,edge,:dx)
+        ltransition=get_prop(celAutom.mg,edge,:ltransition)
+        htransition=get_prop(celAutom.mg,edge,:htransition)
+        if (ltransition + htransition)/dx == 0.0
+            colors[j]= colorant"white"
+        elseif (ltransition + htransition)/dx < 0.2
+            colors[j]= colorant"grey"
+        elseif (ltransition + htransition)/dx < 0.4
+            colors[j]= colorant"blue"
+        elseif (ltransition + htransition)/dx < 0.6
+            colors[j]= colorant"green"
+        elseif (ltransition + htransition)/dx < 0.8
+            colors[j]= colorant"orange"
+        elseif ltransition ==-1
+            colors[j]= colorant"red"
+        else
+            colors[j]= colorant"red"
+        end
+    end
+    return colors
 end
 
-function updateFireList(celAutom::CellulaireAutomaat)
-    vuurlijst= Set{Int64}([])
-    for i in range(1,stop=length(celAutom.fireList))
-        buren = Set{Int64}(neighbors(celAutom.mg, pop!(celAutom.fireList)))
-        union(vuurlijst, buren)
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
+    nodefillc = coloringGraph(celAutom)
+    edgefillc =coloringEdge(celAutom)
+    loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+    g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+    draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
+    for edge in collect(filter_edges(celAutom.mg,:htransition,-1))
+        set_prop!(celAutom.mg,edge,:ltransition,0)
+        set_prop!(celAutom.mg,edge,:htransition,0)
     end
-    celAutom.fireList = vuurlijst
+end
+
+function state1to2(celAutom::CellulaireAutomaat)
+    C = Set{Any}(collect(edges(celAutom.mg))) #alle edges
+    D = Set{Any}(collect(filter_edges(celAutom.mg,:ltransition,0))) #edges met ltransition nul
+    E = Set{Any}(collect(filter_edges(celAutom.mg,:htransition,0))) #edges met htransition nul
+
+    for edge in collect(setdiff(C, intersect(D, E)))
+        if get_prop(celAutom.mg,edge,:ltransition) == 0
+            prop = get_prop(celAutom.mg,edge,:htransition)
+            CV = get_prop(celAutom.mg,edge.dst,:CV)
+            dx = 1#get_prop(celAutom.mg,edge,:dx)
+            if prop + CV < dx
+                set_prop!(celAutom.mg,edge,:htransition,prop + CV)
+            else
+                overschot = prop + CV - dx
+                for node in collect(neighbors(celAutom.mg,edge.src))
+                    if get_prop(celAutom.mg,node,:state)==2
+                        overschot2 = 0
+                    else
+                        overschot2=overschot
+                    end
+                    if node < edge.src
+                        set_prop!(celAutom.mg,node,edge.src,:htransition,max(overschot2,get_prop(celAutom.mg,node,edge.src,:htransition)))
+                    else
+                        set_prop!(celAutom.mg,node,edge.src,:ltransition,max(overschot2,get_prop(celAutom.mg,node,edge.src,:ltransition)))
+                    end
+                    set_prop!(celAutom.mg,edge.src,:state,2)
+                    set_prop!(celAutom.mg,edge.src,:tcounter,0)
+                end
+                set_prop!(celAutom.mg,edge,:htransition,0)
+            end
+        elseif get_prop(celAutom.mg,edge,:htransition) == 0
+            prop = get_prop(celAutom.mg,edge,:ltransition)
+            CV = get_prop(celAutom.mg,edge.src,:CV)
+            dx = 1#get_prop(celAutom.mg,edge,:dx)
+            if prop + CV < dx
+                set_prop!(celAutom.mg,edge,:ltransition,prop + CV)
+            else
+                overschot = prop + CV - dx
+                for node in collect(neighbors(celAutom.mg,edge.dst))
+                    if get_prop(celAutom.mg,node,:state)==2
+                        overschot2 = 0
+                    else
+                        overschot2=overschot
+                    end
+                    if node < edge.dst
+                        set_prop!(celAutom.mg,node,edge.dst,:htransition,max(overschot2,get_prop(celAutom.mg,node,edge.dst,:htransition)))
+                    else
+                        set_prop!(celAutom.mg,node,edge.dst,:ltransition,max(overschot2,get_prop(celAutom.mg,node,edge.dst,:ltransition)))
+                    end
+                    set_prop!(celAutom.mg,edge.dst,:state,2)
+                    set_prop!(celAutom.mg,edge.dst,:tcounter,0)
+                end
+                set_prop!(celAutom.mg,edge,:ltransition,0)
+            end
+        else
+            set_prop!(celAutom.mg,edge,:ltransition,-1)
+            set_prop!(celAutom.mg,edge,:htransition,-1)
+        end
+    end
+end
+
+function state2to1(celAutom::CellulaireAutomaat)
+    for node in collect(filter_vertices(celAutom.mg,:state,2))
+        if get_prop(celAutom.mg,node,:tcounter)==2
+            set_prop!(celAutom.mg,node,:state,1)
+            set_prop!(celAutom.mg,node,:tcounter,0)
+        end
+    end
+end
+
+function updateState(celAutom::CellulaireAutomaat)
+    state1to2(celAutom)
+    state2to1(celAutom)
+
+    # for node in filter_vertices(celAutom.mg,:state,4)
+    #     set_prop!(celAutom.mg,node,:state,1)
+    # end
+    # for node in filter_vertices(celAutom.mg,:state,3)
+    #     set_prop!(celAutom.mg,node,:state,4)
+    # end
+    # looparray=collect(filter_vertices(celAutom.mg,:state,2))
+    # for node in looparray
+    #     set_prop!(celAutom.mg,node,:state,3)
+    #     buren=neighbors(celAutom.mg,node)
+    #     for buur in buren
+    #         if get_prop(celAutom.mg,buur,:state)==1
+    #             set_prop!(celAutom.mg,buur,:state,2)
+    #         end
+    #     end
+    # end
+end
+
+function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
+    celAutom = CellulaireAutomaat((mg=graph,time=0)...)#,tDisp = 100, tSamp = 100)...)
+    for node in collect(vertices(graph))
+        set_prop!(graph,node,:state,1)
+        set_prop!(graph,node,:CV,0.9365)
+        set_prop!(graph,node,:tcounter,0)
+    end
+    for edge in collect(edges(graph))
+        set_prop!(graph,edge,:ltransition,0)
+        set_prop!(graph,edge,:htransition,0)
+    end
+    for node in startwaarden
+        set_prop!(graph,node,:state,2)
+        CV = get_prop(graph,node,:CV)
+        for buur in collect(neighbors(graph, node))
+            if buur < node
+                set_prop!(graph,buur,node,:htransition,CV)
+            else
+                set_prop!(graph,node,buur,:ltransition,CV)
+            end
+        end
+    end
+    return celAutom
+end
+
+#Creates the frames inside a folder, creates the folder if non-existent
+function createFrames(folderName::String,amount::Int64,celAutom::CellulaireAutomaat)
+    #this calculates timesteps until we have the amount of necessary frames
+    #mkdir(folderName)
+    plotGraph2(celAutom,0,folderName)
+    for i in range(1,stop=amount)
+        updateState(celAutom)
+        plotGraph2(celAutom,i,folderName)
+        for node in collect(vertices(celAutom.mg))
+            set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
+        end
+    end
 end
 
 function main()
     graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
-    celAutom = CellulaireAutomaat((mg = graph, fireList = Set{Int64}([1, 50 ,60, 850]))...)
-    plotGraph2(celAutom,0)
-    for i in range(1,stop=15)
-        updateFireList(celAutom)
-        #print(i)
-        plotGraph2(celAutom,i)
-        #print(i)
-    end
+    startwaarden = [1, 50, 124, 245, 378, 472, 596, 632, 780, 875]
+    celAutom = createCellulaireAutomaat(graph, startwaarden)
+    folder="plotjes_test4"
+    createFrames(folder,50,celAutom)
 end
 
 main()
