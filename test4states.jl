@@ -11,6 +11,8 @@ mutable struct CellulaireAutomaat
         #2: active and can fire in next period -> APD
         #3: active and can't fire -> APD
         #4: non-active and can't be depolarised -> DI
+#    ts::Int64 #time sample
+#    td::Int64 #time display
 end
 
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
