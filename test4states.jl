@@ -11,7 +11,6 @@ mutable struct CellulaireAutomaat
         #2: active and can fire in next period -> APD
         #3: active and can't fire -> APD
         #4: non-active and can't be depolarised -> DI
- #    fireDict::Dict{Int64,Int64}
 end
 
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
@@ -62,7 +61,7 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64)
     nodefillc = coloringGraph(celAutom)
     loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
     g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc)
-    draw(PNG("plotjes_test2/frame$i.png", 16cm, 16cm), g1)
+    draw(PNG("plotjes_test3/frame$i.png", 16cm, 16cm), g1)
 end
 
 function updateFireDict(celAutom::CellulaireAutomaat)
@@ -85,7 +84,7 @@ function updateFireDict(celAutom::CellulaireAutomaat)
 end
 
 function main()
-    graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
+    graph = constructGraph("data_vertices_test2.dat", "data_edges_test2.dat", ',')
     celAutom = CellulaireAutomaat(graph)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
