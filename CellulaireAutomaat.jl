@@ -1,4 +1,4 @@
-# Code voor cellulaire automaat
+transitionProp# Code voor cellulaire automaat
 using LightGraphs
 using MetaGraphs
 using DelimitedFiles
@@ -106,15 +106,21 @@ function state1to2(celAutom::CellulaireAutomaat)
     D = Set{Any}(collect(filter_edges(celAutom.mg,:ltransition,0))) #edges met ltransition nul
     E = Set{Any}(collect(filter_edges(celAutom.mg,:htransition,0))) #edges met htransition nul
 
+    #Itereer over alle edges waar er bij minstens één kant een transitie is.
     for edge in collect(setdiff(C, intersect(D, E)))
+        #ltransition = kant van de edge met de lager genummerde vertex
+        #htransition = kant van de edge met de hoger genummerde vertex
         if get_prop(celAutom.mg,edge,:ltransition) == 0
-            prop = get_prop(celAutom.mg,edge,:htransition)
+            #Als ltransition nul is nemen we de htransition.
+            transitionProp= get_prop(celAutom.mg,edge,:htransition)
+            #Conduction velocity CV
             CV = get_prop(celAutom.mg,edge.dst,:CV)
-            dx = 1#get_prop(celAutom.mg,edge,:dx)
-            if prop + CV < dx
-                set_prop!(celAutom.mg,edge,:htransition,prop + CV)
+            #De dx in de file
+            dx = get_prop(celAutom.mg,edge,Symbol(":dx"))
+            if transitionProp + CV < dx
+                set_prop!(celAutom.mg,edge,:htransition,transitionProp + CV)
             else
-                overschot = prop + CV - dx
+                overschot = transitionProp + CV - dx
                 for node in collect(neighbors(celAutom.mg,edge.src))
                     if get_prop(celAutom.mg,node,:state)==2
                         overschot2 = 0
@@ -122,9 +128,13 @@ function state1to2(celAutom::CellulaireAutomaat)
                         overschot2=overschot
                     end
                     if node < edge.src
-                        set_prop!(celAutom.mg,node,edge.src,:htransition,max(overschot2,get_prop(celAutom.mg,node,edge.src,:htransition)))
+                        set_prop!(celAutom.mg,node,edge.src,:htransition,
+                            max(overschot2,get_prop(celAutom.mg,node,edge.src,
+                            :htransition)))
                     else
-                        set_prop!(celAutom.mg,node,edge.src,:ltransition,max(overschot2,get_prop(celAutom.mg,node,edge.src,:ltransition)))
+                        set_prop!(celAutom.mg,node,edge.src,:ltransition,
+                            max(overschot2,get_prop(celAutom.mg,node,edge.src,
+                            :ltransition)))
                     end
                     set_prop!(celAutom.mg,edge.src,:state,2)
                     set_prop!(celAutom.mg,edge.src,:tcounter,0)
@@ -132,13 +142,13 @@ function state1to2(celAutom::CellulaireAutomaat)
                 set_prop!(celAutom.mg,edge,:htransition,0)
             end
         elseif get_prop(celAutom.mg,edge,:htransition) == 0
-            prop = get_prop(celAutom.mg,edge,:ltransition)
+            transitionProp= get_prop(celAutom.mg,edge,:ltransition)
             CV = get_prop(celAutom.mg,edge.src,:CV)
-            dx = 1#get_prop(celAutom.mg,edge,:dx)
-            if prop + CV < dx
-                set_prop!(celAutom.mg,edge,:ltransition,prop + CV)
+            dx = get_prop(celAutom.mg,edge,Symbol(":dx"))
+            if transitionProp + CV < dx
+                set_prop!(celAutom.mg,edge,:ltransition,transitionProp+ CV)
             else
-                overschot = prop + CV - dx
+                overschot = transitionProp+ CV - dx
                 for node in collect(neighbors(celAutom.mg,edge.dst))
                     if get_prop(celAutom.mg,node,:state)==2
                         overschot2 = 0
@@ -146,9 +156,13 @@ function state1to2(celAutom::CellulaireAutomaat)
                         overschot2=overschot
                     end
                     if node < edge.dst
-                        set_prop!(celAutom.mg,node,edge.dst,:htransition,max(overschot2,get_prop(celAutom.mg,node,edge.dst,:htransition)))
+                        set_prop!(celAutom.mg,node,edge.dst,:htransition,
+                            max(overschot2,get_prop(celAutom.mg,node,edge.dst,
+                            :htransition)))
                     else
-                        set_prop!(celAutom.mg,node,edge.dst,:ltransition,max(overschot2,get_prop(celAutom.mg,node,edge.dst,:ltransition)))
+                        set_prop!(celAutom.mg,node,edge.dst,:ltransition,
+                            max(overschot2,get_prop(celAutom.mg,node,edge.dst,
+                            :ltransition)))
                     end
                     set_prop!(celAutom.mg,edge.dst,:state,2)
                     set_prop!(celAutom.mg,edge.dst,:tcounter,0)
