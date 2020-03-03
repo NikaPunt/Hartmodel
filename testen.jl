@@ -60,33 +60,24 @@ function coloringGraph(celAutom::CellulaireAutomaat)
     return nodefillc = nodecolor[membership]
 end
 function coloringEdge(celAutom::CellulaireAutomaat)
-
+    edgecolor = [colorant"white", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
+    colorant"firebrick"]
     #ne = number of edges
-    colors = [colorant"white" for i in 1:ne(celAutom.mg)]
-
-    j = 0
+    membership=ones(Int64,ne(celAutom.mg))
+    j=1
     for edge in collect(edges(celAutom.mg))
-        j += 1
-        dx = 1# get_prop(celAutom.mg,edge,:dx)
-        ltransition=get_prop(celAutom.mg,edge,:ltransition)
-        htransition=get_prop(celAutom.mg,edge,:htransition)
-        if (ltransition + htransition)/dx == 0.0
-            colors[j]= colorant"white"
-        elseif (ltransition + htransition)/dx < 0.2
-            colors[j]= colorant"grey"
-        elseif (ltransition + htransition)/dx < 0.4
-            colors[j]= colorant"blue"
-        elseif (ltransition + htransition)/dx < 0.6
-            colors[j]= colorant"green"
-        elseif (ltransition + htransition)/dx < 0.8
-            colors[j]= colorant"orange"
-        elseif ltransition ==-1
-            colors[j]= colorant"red"
+    ltransition=get_prop(celAutom.mg,edge,:ltransition)
+        if ltransition==-1
+            membership[j]=6
+            j+=1s
         else
-            colors[j]= colorant"red"
+            htransition=get_prop(celAutom.mg,edge,:htransition)
+            dx = 1 # get_prop(celAutom.mg,edge,:dx
+            membership[j]=ceil(Int64,(ltransition+htransition)/dx*5)+1
+            j+=1
         end
     end
-    return colors
+    return colors=edgecolor[membership]
 end
 
 function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
