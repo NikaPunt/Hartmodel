@@ -69,7 +69,7 @@ function coloringEdge(celAutom::CellulaireAutomaat)
     ltransition=get_prop(celAutom.mg,edge,:ltransition)
         if ltransition==-1
             membership[j]=6
-            j+=1s
+            j+=1
         else
             htransition=get_prop(celAutom.mg,edge,:htransition)
             dx = 1 # get_prop(celAutom.mg,edge,:dx
