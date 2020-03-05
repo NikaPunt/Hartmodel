@@ -14,6 +14,8 @@ mutable struct CellulaireAutomaat
     # tDisp::Int64 #display time
     # tSamp::Int64 #sample time
     time::Int64
+    δx::Int64
+    δt::Int64
 end
 
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
@@ -187,9 +189,9 @@ end
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
     celAutom = CellulaireAutomaat((mg=graph,time=0)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
-        set_prop!(graph,node,:state,1)
-        set_prop!(graph,node,:CV,0.9365)
-        set_prop!(graph,node,:tcounter,0)
+        set_prop!(graph,node,:state,1)#Initialize state
+        set_prop!(graph,node,:CV,0.9365)#space units per time unit
+        set_prop!(graph,node,:tcounter,0)#Time since previous change of state
     end
     for edge in collect(edges(graph))
         set_prop!(graph,edge,:ltransition,0)
