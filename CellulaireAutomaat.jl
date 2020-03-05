@@ -14,6 +14,7 @@ mutable struct CellulaireAutomaat
     # tDisp::Int64 #display time
     # tSamp::Int64 #sample time
     time::Int64
+    δt::Int64
 end
 
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
@@ -129,6 +130,7 @@ function state1to2(celAutom::CellulaireAutomaat)
                             :ltransition)))
                     end
                     set_prop!(celAutom.mg,edge.src,:state,2)
+                    set_APD!(celAutom.mg,edge.src)
                     set_prop!(celAutom.mg,edge.src,:tcounter,0)
                 end
                 set_prop!(celAutom.mg,edge,:htransition,0)
@@ -157,6 +159,7 @@ function state1to2(celAutom::CellulaireAutomaat)
                             :ltransition)))
                     end
                     set_prop!(celAutom.mg,edge.dst,:state,2)
+                    set_APD!(celAutom.mg, edge.dst)
                     set_prop!(celAutom.mg,edge.dst,:tcounter,0)
                 end
                 set_prop!(celAutom.mg,edge,:ltransition,0)
@@ -170,7 +173,7 @@ end
 
 function state2to1(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
-        if get_prop(celAutom.mg,node,:tcounter)==2
+        if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,1)
             set_prop!(celAutom.mg,node,:tcounter,0)
         end
@@ -236,6 +239,19 @@ function createFrames(folderName::String,amount::Int64,celAutom::CellulaireAutom
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
     end
+end
+
+#We make the assumption ARI=APD
+function set_APD!(celAutom::CellulaireAutomaat, node)
+    #Implementation formula in ms
+    DI= get_prop(celAutom.mg, node, :tcounter)
+    ARI_ss = 242
+    a = 404
+    b = 36
+    ARI = ARI_ss - a*exp(-DI/b)
+    #ms -> t.u.
+    ARI=ARI/celAutom.δt
+    set_prop!(celAutom.mg,node,:APD, ARI)
 end
 
 function main()
