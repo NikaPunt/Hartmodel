@@ -14,7 +14,6 @@ mutable struct CellulaireAutomaat
     # tDisp::Int64 #display time
     # tSamp::Int64 #sample time
     time::Int64
-    δx::Int64
     δt::Int64
 end
 
@@ -187,7 +186,7 @@ function updateState(celAutom::CellulaireAutomaat)
 end
 
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
-    celAutom = CellulaireAutomaat((mg=graph,time=0)...)#,tDisp = 100, tSamp = 100)...)
+    celAutom = CellulaireAutomaat((mg=graph,δt=1,time=0)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)#Initialize state
         set_prop!(graph,node,:CV,0.9365)#space units per time unit
