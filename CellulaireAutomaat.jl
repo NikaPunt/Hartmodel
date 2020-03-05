@@ -62,7 +62,7 @@ function coloringGraph(celAutom::CellulaireAutomaat)
 end
 function coloringEdge(celAutom::CellulaireAutomaat)
     edgecolor = [colorant"white", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
-    colorant"firebrick"]
+    colorant"firebrick",colorant"green"]
     #ne = number of edges
     membership=ones(Int64,ne(celAutom.mg))
     j=1
@@ -73,9 +73,16 @@ function coloringEdge(celAutom::CellulaireAutomaat)
             j+=1
         else
             htransition=get_prop(celAutom.mg,edge,:htransition)
-            dx = 1 # get_prop(celAutom.mg,edge,:dx
+            dx = 1 # get_prop(celAutom.mg,edge,:dx)
             membership[j]=ceil(Int64,(ltransition+htransition)/dx*5)+1
             j+=1
+        end
+    end
+    for i in range(1,stop=ne(celAutom.mg))
+        if membership[i] in [1 2 3 4 5 6]
+        else
+            println("Hier loopt iets mis")
+            membership[i]=7
         end
     end
     return colors=edgecolor[membership]
@@ -130,7 +137,7 @@ function state1to2(celAutom::CellulaireAutomaat)
                             :ltransition)))
                     end
                     set_prop!(celAutom.mg,edge.src,:state,2)
-                    set_APD!(celAutom.mg,edge.src)
+                    set_APD!(celAutom,edge.src)
                     set_prop!(celAutom.mg,edge.src,:tcounter,0)
                 end
                 set_prop!(celAutom.mg,edge,:htransition,0)
@@ -159,7 +166,7 @@ function state1to2(celAutom::CellulaireAutomaat)
                             :ltransition)))
                     end
                     set_prop!(celAutom.mg,edge.dst,:state,2)
-                    set_APD!(celAutom.mg, edge.dst)
+                    set_APD!(celAutom, edge.dst)
                     set_prop!(celAutom.mg,edge.dst,:tcounter,0)
                 end
                 set_prop!(celAutom.mg,edge,:ltransition,0)
@@ -173,6 +180,7 @@ end
 
 function state2to1(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
+        #HIER LOOPT HET MIS
         if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,1)
             set_prop!(celAutom.mg,node,:tcounter,0)
@@ -203,11 +211,12 @@ function updateState(celAutom::CellulaireAutomaat)
 end
 
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
-    celAutom = CellulaireAutomaat((mg=graph,time=0)...)#,tDisp = 100, tSamp = 100)...)
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=100000)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,0.9365)
         set_prop!(graph,node,:tcounter,0)
+        set_prop!(graph,node,:APD,2)
     end
     for edge in collect(edges(graph))
         set_prop!(graph,edge,:ltransition,0)
@@ -242,13 +251,13 @@ function createFrames(folderName::String,amount::Int64,celAutom::CellulaireAutom
 end
 
 #We make the assumption ARI=APD
-function set_APD!(celAutom::CellulaireAutomaat, node)
+function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     #Implementation formula in ms
     DI= get_prop(celAutom.mg, node, :tcounter)
     ARI_ss = 242
     a = 404
     b = 36
-    ARI = ARI_ss - a*exp(-DI/b)
+    ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
     #ms -> t.u.
     ARI=ARI/celAutom.δt
     set_prop!(celAutom.mg,node,:APD, ARI)
