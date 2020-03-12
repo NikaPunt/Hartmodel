@@ -107,7 +107,7 @@ function state1to2(celAutom::CellulaireAutomaat)
                 set_prop!(celAutom.mg,edge,:htransition,prop + CV)
             else
                 overschot = prop + CV - dx
-                for node in collect(neighbors(celAutom.mg,edge.src))
+                for node in collect(setdiff(neighbors(celAutom.mg,edge.src),edge.dst))
                     if get_prop(celAutom.mg,node,:state)==2
                         overschot2 = 0
                     else
@@ -131,7 +131,7 @@ function state1to2(celAutom::CellulaireAutomaat)
                 set_prop!(celAutom.mg,edge,:ltransition,prop + CV)
             else
                 overschot = prop + CV - dx
-                for node in collect(neighbors(celAutom.mg,edge.dst))
+                for node in collect(setdiff(neighbors(celAutom.mg,edge.dst),edge.src))
                     if get_prop(celAutom.mg,node,:state)==2
                         overschot2 = 0
                     else

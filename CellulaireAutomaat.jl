@@ -7,10 +7,9 @@ include("plot_graph.jl")
 mutable struct CellulaireAutomaat
     mg::MetaGraph
     #properties nodes:
-        #1: non-active and can be depolarised -> DI
-        #2: active and can fire in next period -> APD
-        #3: active and can't fire -> APD
-        #4: non-active and can't be depolarised -> DI
+        #1: non-active and can be depolarised -> DI (black)
+        #2: active and fires in begin period -> APD (red)
+        #4: non-active and can't be depolarised -> DI (green)
     # tDisp::Int64 #display time
     # tSamp::Int64 #sample time
     time::Int64
@@ -69,10 +68,8 @@ end
 #   @post   nodefillc will assign the color "black" to nodes in state one,
 #           "maroon" to nodes in state two and "red4" to nodes in state three.
 function coloringGraph(celAutom::CellulaireAutomaat)
-    nodecolor = [colorant"black", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
-    colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",
-    colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2",
-    colorant"yellow"]
+    nodecolor = [colorant"black", colorant"red",colorant"green"]
+    #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
     for node in filter_vertices(celAutom.mg,:state,2)
@@ -115,7 +112,7 @@ function coloringEdge(celAutom::CellulaireAutomaat)
     for i in range(1,stop=ne(celAutom.mg))
         if membership[i] in [1 2 3 4 5 6]
         else
-            #println("Probleempje")
+            println("Probleempje")
             membership[i]=7
         end
     end
@@ -165,12 +162,18 @@ function state1to2!(celAutom::CellulaireAutomaat)
     E = Set{Any}(collect(filter_edges(celAutom.mg,:htransition,0))) #edges met htransition nul
 
     #Itereer over alle edges waar er bij minstens één kant een transitie is.
+
     for edge in collect(setdiff(C, intersect(D, E)))
         #ltransition = kant van de edge met de lager genummerde vertex
         #htransition = kant van de edge met de hoger genummerde vertex
         if get_prop(celAutom.mg,edge,:ltransition) == 0
+            set_ltransition!()
             #Als ltransition nul is nemen we de htransition.
             transitionProp= get_prop(celAutom.mg,edge,:htransition)
+            #If the node just fires, then we recalculate the CV
+            if get_prop(celAutom.mg,edge.dst,:tcounter)<1
+                set_CV!(celAutom,edge.dst)
+            end
             #Conduction velocity CV
             CV = get_prop(celAutom.mg,edge.dst,:CV)
             #De dx in de file
@@ -179,8 +182,8 @@ function state1to2!(celAutom::CellulaireAutomaat)
                 set_prop!(celAutom.mg,edge,:htransition,transitionProp + CV)
             else
                 overschot = transitionProp + CV - dx
-                for node in collect(neighbors(celAutom.mg,edge.src))
-                    if get_prop(celAutom.mg,node,:state)==2
+                for node in collect(setdiff(neighbors(celAutom.mg,edge.src),edge.dst))
+                    if get_prop(celAutom.mg,node,:state)!=1
                         overschot2 = 0
                     else
                         overschot2=overschot
@@ -195,7 +198,7 @@ function state1to2!(celAutom::CellulaireAutomaat)
                             :ltransition)))
                     end
                 end
-                if get_prop(celAutom.mg, edge.src, :state)!=2
+                if get_prop(celAutom.mg, edge.src, :state)==1
                     set_prop!(celAutom.mg,edge.src,:state,2)
                     set_APD!(celAutom,edge.src)
                     set_prop!(celAutom.mg,edge.src,:tcounter,0)
@@ -204,14 +207,18 @@ function state1to2!(celAutom::CellulaireAutomaat)
             end
         elseif get_prop(celAutom.mg,edge,:htransition) == 0
             transitionProp= get_prop(celAutom.mg,edge,:ltransition)
+            #If the node just fires, then we recalculate the CV
+            if get_prop(celAutom.mg,edge.src,:tcounter)<1
+                set_CV!(celAutom,edge.src)
+            end
             CV = get_prop(celAutom.mg,edge.src,:CV)
             dx = get_prop(celAutom.mg,edge,Symbol(":dx"))
             if transitionProp + CV < dx
                 set_prop!(celAutom.mg,edge,:ltransition,transitionProp+ CV)
             else
                 overschot = transitionProp+ CV - dx
-                for node in collect(neighbors(celAutom.mg,edge.dst))
-                    if get_prop(celAutom.mg,node,:state)==2
+                for node in collect(setdiff(neighbors(celAutom.mg,edge.dst),edge.src))
+                    if get_prop(celAutom.mg,node,:state)!=1
                         overschot2 = 0
                     else
                         overschot2=overschot
@@ -226,7 +233,7 @@ function state1to2!(celAutom::CellulaireAutomaat)
                             :ltransition)))
                     end
                 end
-                if get_prop(celAutom.mg, edge.dst, :state)!=2
+                if get_prop(celAutom.mg, edge.dst, :state)==1
                     set_prop!(celAutom.mg,edge.dst,:state,2)
                     set_APD!(celAutom, edge.dst)
                     set_prop!(celAutom.mg,edge.dst,:tcounter,0)
@@ -249,12 +256,28 @@ end
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
 #   @post   If a node in state 2 TODO
-function state2to1!(celAutom::CellulaireAutomaat)
+function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
-        #HIER LOOPT HET MIS
         if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
-            set_prop!(celAutom.mg,node,:state,1)
+            set_prop!(celAutom.mg,node,:state,3)
             set_prop!(celAutom.mg,node,:tcounter,0)
+        end
+    end
+end
+##
+#   state3to1! looks at the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) and evaluates every single node.
+#   If a node meets all the requirements to switch from state three to one,
+#   state3to1! will set the state property from those nodes to the value '1.'
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   If a node in state 3 TODO
+function state3to1!(celAutom::CellulaireAutomaat)
+    for node in collect(filter_vertices(celAutom.mg,:state,3))
+        if get_prop(celAutom.mg,node,:tcounter)>=10
+            set_prop!(celAutom.mg,node,:state,1)
         end
     end
 end
@@ -268,7 +291,8 @@ end
 #   @effect This function calls state1to2! first, then state2to1!.
 function updateState!(celAutom::CellulaireAutomaat)
     state1to2!(celAutom)
-    state2to1!(celAutom)
+    state2to3!(celAutom)
+    state3to1!(celAutom)
 end
 ##
 #   createCellulaireAutomaat will create an instance of CellulaireAutomaat,
@@ -296,10 +320,10 @@ end
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=100000)...)#,tDisp = 100, tSamp = 100)...)
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
-        set_prop!(graph,node,:CV,0.9365)
+        set_prop!(graph,node,:CV,0.09365)
         set_prop!(graph,node,:tcounter,100)
         set_prop!(graph,node,:APD,2)
     end
@@ -326,24 +350,45 @@ end
 #   Then it calls plotGraph2 to create the image.
 #
 #   @param  (String) folderName
-#
-#   @param
-#
-#
+#           The name of the folder to be made. If it
+#           exists it doesn't attempt to make a new one. If it doesn't exist,
+#           the directory will be created.
+#   @param  (Int64) amount
+#           The amount of frames to make.
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   #amount frames will be made. Each time by calling an updateState to
+#           go to the next state and then calling plotGraph2 to plot the graph.
 function createFrames(folderName::String,amount::Int64,celAutom::CellulaireAutomaat)
     #this calculates timesteps until we have the amount of necessary frames
-    #mkdir(folderName)
+    try
+        mkdir(folderName)
+    catch
+    end
     plotGraph2(celAutom,0,folderName)
-    for i in range(1,stop=amount)
-        updateState(celAutom)
-        plotGraph2(celAutom,i,folderName)
+    for i in range(1,stop=amount*10)
+        updateState!(celAutom)
+        if mod(i,10)==0
+            plotGraph2(celAutom,Int64(i/10),folderName)
+        end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
     end
 end
-
-#We make the assumption ARI=APD
+##
+#   This function sets the APD of the given node. The used formula was taken
+#   from a paper's function fit. We make the assumption
+#   Absolute Restitution Interval = Action Potential Duration.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @param  (Int64) node
+#           The value of the node in the graph, whose APD needs to be changed.
+#   @post   The given node will have its APD property changed to the new value
+#           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     #Implementation formula in ms
     DI= get_prop(celAutom.mg, node, :tcounter)
@@ -355,7 +400,22 @@ function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     ARI=ARI/celAutom.δt
     set_prop!(celAutom.mg,node,:APD, ARI)
 end
-
+##
+#   This function sets the CV of the given node.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @param  (Int64) node
+#           The value of the node in the graph, whose APD needs to be changed.
+#   @post   The given node will have its CV property changed to the new value
+#           of: TODO for nielske
+function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
+    DI=get_prop(celAutom.mg, node, :tcounter)
+    CV=0.9301
+    set_prop!(celAutom.mg, node,:CV, CV)
+end
+##
 function main()
     start = time()
     graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
