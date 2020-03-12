@@ -17,6 +17,19 @@ mutable struct CellulaireAutomaat
     δt::Int64
 end
 
+##
+#   constructGraph will construct a metagraph with several given properties
+#   that are described in the header of the input files.
+#
+#   @param  (String) filename_vertices
+#           This is the name of the file to be read containing the vertices
+#   @param  (String) filename_edges
+#           This is the name of the file to be read containing the edges
+#   @param  (Char)  delimiter
+#           This is the delimiter symbol that separates the streamed string
+#           into parameter values.
+#   @post   Returns a MetaGraph object with the properties described in
+#           filename_edges and filename_vertices.
 function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
     input_vertices = readdlm(filename_vertices,delimiter)
     input_edges = readdlm(filename_edges,delimiter)
@@ -43,8 +56,18 @@ function constructGraph(filename_vertices::String,filename_edges::String,delimit
     println("Graph check!")
     return mg
 end
-
-#returns a nodefillc
+##
+#   coloringGraph will return an array of colors that can color the nodes of
+#   the MetaGraph embedded in the given CellulaireAutomaat. This array can be
+#   used as the nodefillc array used in the gplot function.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   Returns nodefillc, an array of type Array{RGB{Normed{UInt8, 8}},1}
+#           with the needed coloring for the gplot function.
+#   @post   nodefillc will assign the color "black" to nodes in state one,
+#           "maroon" to nodes in state two and "red4" to nodes in state three.
 function coloringGraph(celAutom::CellulaireAutomaat)
     nodecolor = [colorant"black", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
     colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",
@@ -60,6 +83,17 @@ function coloringGraph(celAutom::CellulaireAutomaat)
     end
     return nodefillc = nodecolor[membership]
 end
+##
+#   coloringGraph will return an array of colors that can color the edges of
+#   the MetaGraph embedded in the given CellulaireAutomaat. This array can be
+#   used as the edgestrokec array used in the gplot function.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   Returns colors, an array of type Array{RGB{Normed{UInt8, 8}},1}
+#           with the needed coloring for the gplot function.
+#   @post   The array colors will TODO
 function coloringEdge(celAutom::CellulaireAutomaat)
     edgecolor = [colorant"white", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
     colorant"firebrick",colorant"green"]
@@ -81,13 +115,29 @@ function coloringEdge(celAutom::CellulaireAutomaat)
     for i in range(1,stop=ne(celAutom.mg))
         if membership[i] in [1 2 3 4 5 6]
         else
-            println("Hier loopt iets mis")
+            #println("Probleempje")
             membership[i]=7
         end
     end
     return colors=edgecolor[membership]
 end
-
+##
+#   plotGraph2 uses the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) to create an image of the (colored)
+#   MetaGraph object.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @param  (Int64) i
+#           This is the number assigned to the end of the name of the
+#           picture file.
+#   @param  (String) folder
+#           this is the name of the folder used to store the pictures. If it
+#           exists it doesn't attempt to make a new one. If it doesn't exist,
+#           the directory will be created.
+#   @post   Generates an image of the colored MetaGraph object using the gplot
+#           function and stored as $folder/frame$i.png.
 function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
     nodefillc = coloringGraph(celAutom)
     edgefillc =coloringEdge(celAutom)
@@ -99,9 +149,17 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
         set_prop!(celAutom.mg,edge,:htransition,0)
     end
 end
-
-
-function state1to2(celAutom::CellulaireAutomaat)
+##
+#   state1to2! looks at the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) and evaluates every single node.
+#   If a node meets all the requirements to switch from state one to two,
+#   state1to2! will set the state property from those nodes to the value '2.'
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   If a node in state 1 TODO
+function state1to2!(celAutom::CellulaireAutomaat)
     C = Set{Any}(collect(edges(celAutom.mg))) #alle edges
     D = Set{Any}(collect(filter_edges(celAutom.mg,:ltransition,0))) #edges met ltransition nul
     E = Set{Any}(collect(filter_edges(celAutom.mg,:htransition,0))) #edges met htransition nul
@@ -136,6 +194,8 @@ function state1to2(celAutom::CellulaireAutomaat)
                             max(overschot2,get_prop(celAutom.mg,node,edge.src,
                             :ltransition)))
                     end
+                end
+                if get_prop(celAutom.mg, edge.src, :state)!=2
                     set_prop!(celAutom.mg,edge.src,:state,2)
                     set_APD!(celAutom,edge.src)
                     set_prop!(celAutom.mg,edge.src,:tcounter,0)
@@ -165,6 +225,8 @@ function state1to2(celAutom::CellulaireAutomaat)
                             max(overschot2,get_prop(celAutom.mg,node,edge.dst,
                             :ltransition)))
                     end
+                end
+                if get_prop(celAutom.mg, edge.dst, :state)!=2
                     set_prop!(celAutom.mg,edge.dst,:state,2)
                     set_APD!(celAutom, edge.dst)
                     set_prop!(celAutom.mg,edge.dst,:tcounter,0)
@@ -177,8 +239,17 @@ function state1to2(celAutom::CellulaireAutomaat)
         end
     end
 end
-
-function state2to1(celAutom::CellulaireAutomaat)
+##
+#   state2to1! looks at the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) and evaluates every single node.
+#   If a node meets all the requirements to switch from state two to one,
+#   state2to1! will set the state property from those nodes to the value '1.'
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   If a node in state 2 TODO
+function state2to1!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
         #HIER LOOPT HET MIS
         if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
@@ -187,35 +258,49 @@ function state2to1(celAutom::CellulaireAutomaat)
         end
     end
 end
-
-function updateState(celAutom::CellulaireAutomaat)
-    state1to2(celAutom)
-    state2to1(celAutom)
-
-    # for node in filter_vertices(celAutom.mg,:state,4)
-    #     set_prop!(celAutom.mg,node,:state,1)
-    # end
-    # for node in filter_vertices(celAutom.mg,:state,3)
-    #     set_prop!(celAutom.mg,node,:state,4)
-    # end
-    # looparray=collect(filter_vertices(celAutom.mg,:state,2))
-    # for node in looparray
-    #     set_prop!(celAutom.mg,node,:state,3)
-    #     buren=neighbors(celAutom.mg,node)
-    #     for buur in buren
-    #         if get_prop(celAutom.mg,buur,:state)==1
-    #             set_prop!(celAutom.mg,buur,:state,2)
-    #         end
-    #     end
-    # end
+##
+#   updateState! will update the states of all the nodes of the embedded
+#   MetaGraph object in the CellulaireAutomaat object (celAutom).
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @effect This function calls state1to2! first, then state2to1!.
+function updateState!(celAutom::CellulaireAutomaat)
+    state1to2!(celAutom)
+    state2to1!(celAutom)
 end
-
+##
+#   createCellulaireAutomaat will create an instance of CellulaireAutomaat,
+#   with the given graph, and node(s) with initial excitation.
+#
+#   @param  (MetaGraph) graph
+#           The graph to be embedded in the new cellular automaton.
+#   @param  (Array{Int64, 1}) startwaarden
+#           The values of the nodes that have an initial excitation.
+#   @post   The embedded MetaGraph has the property state imposed on the nodes.
+#           The state of all nodes except the values in startwaarden are set to
+#           '1' by default. Whilst the rest are set to '2.'
+#   @post   The embedded MetaGraph has the property tcounter imposed on the nodes.
+#           (tcounter - time counter) TODO
+#   @post   The embedded MetaGraph has the property CV imposed on the nodes.
+#           (CV - conduction velocity) TODO
+#   @post   The embedded MetaGraph has the property APD imposed on the nodes.
+#           (APD - action potential duration) TODO
+#   @post   The embedded MetaGraph has the property ltransition imposed on the edges.
+#           (ltransition - lower transition) This is the fraction of the
+#           conduction in the edge going from the lower numbered node to
+#           the higher numbered node.
+#   @post   The embedded MetaGraph has the property htransition imposed on the edges.
+#           (ltransition - higher transition) This is the fraction of the
+#           conduction in the edge going from the higher numbered node to
+#           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
     celAutom = CellulaireAutomaat((mg=graph,time=0,δt=100000)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,0.9365)
-        set_prop!(graph,node,:tcounter,0)
+        set_prop!(graph,node,:tcounter,100)
         set_prop!(graph,node,:APD,2)
     end
     for edge in collect(edges(graph))
@@ -235,8 +320,16 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
     end
     return celAutom
 end
-
-#Creates the frames inside a folder, creates the folder if non-existent
+##
+#   createFrames will create frames as much as the given amount. This function
+#   calls the updateState function to update everything to the next timestep.
+#   Then it calls plotGraph2 to create the image.
+#
+#   @param  (String) folderName
+#
+#   @param
+#
+#
 function createFrames(folderName::String,amount::Int64,celAutom::CellulaireAutomaat)
     #this calculates timesteps until we have the amount of necessary frames
     #mkdir(folderName)
