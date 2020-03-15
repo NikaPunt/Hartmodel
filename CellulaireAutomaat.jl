@@ -198,7 +198,7 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
         if get_prop(celAutom.mg, edgeSide[1], :state)==1
             set_prop!(celAutom.mg,edgeSide[1],:state,2)
             set_APD!(celAutom,edgeSide[1])
-            set_CV!(celAutom,edgeSide[2])
+            set_CV!(celAutom,edgeSide[1])
             set_prop!(celAutom.mg,edgeSide[1],:tcounter,0)
         end
         set_prop!(celAutom.mg,edge,transitionSide[2],0)
@@ -406,10 +406,10 @@ end
 #   @param  (Int64) node
 #           The value of the node in the graph, whose APD needs to be changed.
 #   @post   The given node will have its CV property changed to the new value
-#           of: TODO for nielske
+#           of: CV = 70.03-52.12*e^(-DI/87.6)
 function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
-    DI=get_prop(celAutom.mg, node, :tcounter)
-    CV=70.03-52.12*exp(DI/87.6)#cm/sec
+    DI=get_prop(celAutom.mg, node, :tcounter)/celAutom.δt*1000#DI in sec
+    CV=70.03-52.12*exp(-DI/87.6)#cm/sec
     CV=CV*celAutom.δt/1000#transition to cm/t.u.
     CV=CV*celAutom.δx#transition to s.u./t.u.
     set_prop!(celAutom.mg, node,:CV, CV)
