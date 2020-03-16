@@ -11,8 +11,8 @@ mutable struct CellulaireAutomaat
         #2: active and fires in begin period -> APD (red)
         #3: non-active and can't be depolarised -> DI (green)
     time::Int64
-    δt::Int64 #the time unit in ms
-    δx::Float64 #the space unit in cm
+    δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
+    δx::Float64 #the space unit in cm -> 1 s.u. = δx cm
 end
 
 ##
@@ -103,8 +103,7 @@ function coloringEdge(celAutom::CellulaireAutomaat)
             j+=1
         else
             htransition=get_prop(celAutom.mg,edge,:htransition)
-            dx = 1 # get_prop(celAutom.mg,edge,:dx)
-            membership[j]=ceil(Int64,(ltransition+htransition)/dx*5)+1
+            membership[j]=ceil(Int64,(ltransition+htransition)*5)+1
             j+=1
         end
     end
@@ -171,27 +170,28 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
     #Conduction velocity CV
     CV = get_prop(celAutom.mg,edgeSide[2],:CV)
     #De dx in de file
-    dx = get_prop(celAutom.mg,edge,Symbol(":dx"))
+    dx = get_prop(celAutom.mg,edge,Symbol(":dx"))#length of the edge in s.u.
     #We look at the fraction of the dx in the next period and if it is lower then 100%
     if transitionProp + CV/dx < 1
         set_prop!(celAutom.mg,edge,transitionSide[2],transitionProp + CV/dx)
     else
-        overschot = transitionProp*dx + CV - dx #overschot in s.u.
+        surplus = transitionProp*dx + CV - dx #surplus in s.u.
         for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[1]),edgeSide[2]))
             if get_prop(celAutom.mg,node,:state)!=1
-                overschot2 = 0
+                surplus2 = 0
             else
-                #Fraction in time in other edge = overschot/CV
+                #Fraction in time in other edge = surplus/CV
                 #We get the distance by multiplying with the CV of the other edge
-                overschot2=overschot/CV*get_prop(celAutom.mg,edgeSide[1],:CV)
+                surplus2=surplus/CV*get_prop(celAutom.mg,edgeSide[1],:CV)
             end
+                    #TODO Things go wrong when surplus2>1, not build in
             if node < edgeSide[1]
                 set_prop!(celAutom.mg,node,edgeSide[1],:htransition,
-                    max(overschot2/dx,get_prop(celAutom.mg,node,edgeSide[1],
+                    max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[1],
                     :htransition)))
             else
                 set_prop!(celAutom.mg,node,edgeSide[1],:ltransition,
-                    max(overschot2/dx,get_prop(celAutom.mg,node,edgeSide[1],
+                    max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[1],
                     :ltransition)))
             end
         end
@@ -317,8 +317,8 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
     celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
-        set_prop!(graph,node,:CV,0.09365)
-        set_prop!(graph,node,:tcounter,100)
+        set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
+        set_prop!(graph,node,:tcounter,1000)
         set_prop!(graph,node,:APD,242/celAutom.δt)
     end
     for edge in collect(edges(graph))
@@ -327,6 +327,7 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
     end
     for node in startwaarden
         set_prop!(graph,node,:state,2)
+        set_prop!(graph,node,:tcounter,0)
         CV = get_prop(graph,node,:CV)
         for buur in collect(neighbors(graph, node))
             if buur < node
@@ -373,6 +374,7 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
+                                    #TODO title plot with celAutom.time
         celAutom.time+=celAutom.δt
     end
 end
@@ -408,10 +410,10 @@ end
 #   @post   The given node will have its CV property changed to the new value
 #           of: CV = 70.03-52.12*e^(-DI/87.6)
 function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
-    DI=get_prop(celAutom.mg, node, :tcounter)/celAutom.δt*1000#DI in sec
+    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt/1000#DI in sec
     CV=70.03-52.12*exp(-DI/87.6)#cm/sec
     CV=CV*celAutom.δt/1000#transition to cm/t.u.
-    CV=CV*celAutom.δx#transition to s.u./t.u.
+    CV=CV/celAutom.δx#transition to s.u./t.u.
     set_prop!(celAutom.mg, node,:CV, CV)
 end
 ##
