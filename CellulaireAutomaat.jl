@@ -89,7 +89,10 @@ end
 #           type MetaGraph.
 #   @post   Returns colors, an array of type Array{RGB{Normed{UInt8, 8}},1}
 #           with the needed coloring for the gplot function.
-#   @post   The array colors will TODO
+#   @post   The edges will be colored in a spectrum from white (not excited at all)
+#           to dark red (completely excited),
+#           depending on the ltransition and/or htransition in the edge.
+#           Edges recovering from excitation will be colored green.
 function coloringEdge(celAutom::CellulaireAutomaat)
     edgecolor = [colorant"white", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
     colorant"firebrick",colorant"green"]
@@ -139,7 +142,7 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
     loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
     g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
     draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
-    for edge in collect(filter_edges(celAutom.mg,:htransition,-1))
+    for edge in collect(filter_edges(celAutom.mg,:ltransition,-1))
         set_prop!(celAutom.mg,edge,:ltransition,0)
         set_prop!(celAutom.mg,edge,:htransition,0)
     end
@@ -159,49 +162,98 @@ end
 #   @post   The conduction fraction in the edge will be updated.
 function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleGraphs.SimpleEdge{Int64},direction::Bool)
     if direction
-        transitionSide = [:ltransition, :htransition]
-        edgeSide = [edge.src, edge.dst]
+        transitionArray = Array{Symbol,1}
+        transitionArray=[:ltransition]
+        edgeMatrix = Array{Int64,2}
+        edgeMatrix = [[edge.src edge.dst];]
     else
-        transitionSide = [:htransition, :ltransition]
-        edgeSide = [edge.dst, edge.src]
+        transitionArray = Array{Symbol,1}
+        transitionArray= [:htransition]
+        edgeMatrix =  Array{Int64,2}
+        edgeMatrix = [[edge.dst edge.src];]
     end
-    #Als ltransition nul is nemen we de htransition.
-    transitionProp= get_prop(celAutom.mg,edge,transitionSide[2])
-    #Conduction velocity CV
-    CV = get_prop(celAutom.mg,edgeSide[2],:CV)
-    #De dx in de file
-    dx = get_prop(celAutom.mg,edge,Symbol(":dx"))#length of the edge in s.u.
-    #We look at the fraction of the dx in the next period and if it is lower then 100%
-    if transitionProp + CV/dx < 1
-        set_prop!(celAutom.mg,edge,transitionSide[2],transitionProp + CV/dx)
-    else
-        surplus = transitionProp*dx + CV - dx #surplus in s.u.
-        for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[1]),edgeSide[2]))
-            if get_prop(celAutom.mg,node,:state)!=1
-                surplus2 = 0
+    #transitionSide als nx2 matrix met start en end node
+    while edgeMatrix!=Array{Int64}(undef,0,2)
+        for i in size(transitionArray,1):-1:1
+            edgeSide=edgeMatrix[i,:]
+            transitionSide=transitionArray[i]
+            #Als ltransition nul is nemen we de htransition.
+            transitionProp= get_prop(celAutom.mg,edge,transitionSide)
+            #Conduction velocity CV
+            CV = get_prop(celAutom.mg,edgeSide[1],:CV)
+            #De dx in de file
+            dx = get_prop(celAutom.mg,edgeSide[1],edgeSide[2],Symbol(":dx"))#length of the edge in s.u.
+            #We look at the fraction of the dx in the next period and if it is lower then 100%
+            if transitionProp + CV/dx < 1
+                set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,transitionProp + CV/dx)
             else
-                #Fraction in time in other edge = surplus/CV
-                #We get the distance by multiplying with the CV of the other edge
-                surplus2=surplus/CV*get_prop(celAutom.mg,edgeSide[1],:CV)
+                surplus = transitionProp*dx + CV - dx #surplus in s.u. over the edge
+                for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[2]),edgeSide[1]))
+                    if (get_prop(celAutom.mg,node,:state)==2&&get_prop(celAutom.mg, node,:tcounter)!=0)||get_prop(celAutom.mg,node,:state)==3
+                        surplus2 = 0
+                    else
+                        #Fraction in time in first edge = surplus/CV
+                        #We get the distance by multiplying with the CV of the other edge
+                        surplus2=surplus/CV*get_prop(celAutom.mg,edgeSide[2],:CV)
+                    end
+                    #When the fraction is smaller than 100% we set the transition
+                    if surplus2/dx<1
+                        if node < edgeSide[2]&&get_prop(celAutom.mg,node,edgeSide[2],
+                        :ltransition)==0
+                            set_prop!(celAutom.mg,node,edgeSide[2],:htransition,
+                                max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[2],
+                                :htransition)))
+                        elseif get_prop(celAutom.mg,node,edgeSide[2],
+                        :htransition)==0
+                            set_prop!(celAutom.mg,node,edgeSide[2],:ltransition,
+                                max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[2],
+                                :ltransition)))
+                        else
+                            set_prop!(celAutom.mg,node,edgeSide[2],:ltransition,-1)
+                        end
+                    else
+                        #we add the extra paths into the matrix
+                        #and give them according transition properties
+                        for node2 in collect(setdiff(neighbors(celAutom.mg,node),edgeSide[2]))
+                            if get_prop(celAutom.mg, node2, :state)==1#||(get_prop(celAutom.mg, node2,:state)==2&&get_prop(celAutom.mg, node,:tcounter)==0)
+                                edgeMatrix=[edgeMatrix;node node2]#Flow goes from node to node2
+                                set_prop!(celAutom.mg,node,:state,2)
+                                if get_prop(celAutom.mg,node,:tcounter)!=0
+                                    set_APD!(celAutom,node)
+                                    set_CV!(celAutom,node)
+                                    set_prop!(celAutom.mg,node,:tcounter,0)
+                                end
+                                #there is an ltransition
+                                if node<node2&&get_prop(celAutom.mg, node,node2,:htransition)==0
+                                    transitionArray=[transitionArray;:ltransition]
+                                    set_prop!(celAutom.mg, node, node2, :ltransition,
+                                        get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)
+                                #htransition
+                                elseif node>node2&&get_prop(celAutom.mg, node,node2,:ltransition)==0
+                                    transitionArray=[transitionArray;:htransition]
+                                    set_prop!(celAutom.mg, node, node2, :htransition,
+                                        get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)
+                                else
+                                    set_prop!(celAutom.mg,node, node2, :ltransition,-1)
+                                end
+                            end
+                        end
+                        set_prop!(celAutom.mg,edgeSide[1],node,transitionSide,0)
+                    end
+                end
+                if get_prop(celAutom.mg, edgeSide[2], :state)==1
+                    set_prop!(celAutom.mg,edgeSide[2],:state,2)
+                    set_APD!(celAutom,edgeSide[2])
+                    set_CV!(celAutom,edgeSide[2])
+                    set_prop!(celAutom.mg,edgeSide[2],:tcounter,0)
+                end
+                set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,0)
             end
-                    #TODO Things go wrong when surplus2>1, not build in
-            if node < edgeSide[1]
-                set_prop!(celAutom.mg,node,edgeSide[1],:htransition,
-                    max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[1],
-                    :htransition)))
-            else
-                set_prop!(celAutom.mg,node,edgeSide[1],:ltransition,
-                    max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[1],
-                    :ltransition)))
-            end
+            #remove edge i from matrix
+            index=[1:(i-1);(i+1):size(transitionArray,1)]
+            transitionArray=transitionArray[index,:]
+            edgeMatrix=edgeMatrix[index,:]
         end
-        if get_prop(celAutom.mg, edgeSide[1], :state)==1
-            set_prop!(celAutom.mg,edgeSide[1],:state,2)
-            set_APD!(celAutom,edgeSide[1])
-            set_CV!(celAutom,edgeSide[1])
-            set_prop!(celAutom.mg,edgeSide[1],:tcounter,0)
-        end
-        set_prop!(celAutom.mg,edge,transitionSide[2],0)
     end
 end
 
@@ -214,7 +266,9 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
-#   @post   If a node in state 1 TODO
+#   @post   If a node in state 1 has neighbouring edge(s) that have a ltransition
+#           or htransition high enough to excite the node, the state of this node
+#           will change from '1' to '2'.
 function state1to2!(celAutom::CellulaireAutomaat)
     C = Set{Any}(collect(edges(celAutom.mg))) #alle edges
     D = Set{Any}(collect(filter_edges(celAutom.mg,:ltransition,0))) #edges met ltransition nul
@@ -226,9 +280,9 @@ function state1to2!(celAutom::CellulaireAutomaat)
         #ltransition = kant van de edge met de lager genummerde vertex
         #htransition = kant van de edge met de hoger genummerde vertex
         if get_prop(celAutom.mg,edge,:ltransition) == 0
-            makeTransition!(celAutom, edge, true)
-        elseif get_prop(celAutom.mg,edge,:htransition) == 0
             makeTransition!(celAutom, edge, false)
+        elseif get_prop(celAutom.mg,edge,:htransition) == 0
+            makeTransition!(celAutom, edge, true)
         else
             set_prop!(celAutom.mg,edge,:ltransition,-1)
             set_prop!(celAutom.mg,edge,:htransition,-1)
@@ -245,7 +299,9 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
-#   @post   If a node in state 2 TODO
+#   @post   If a node has been in state 2 for a time tcounter longer than its APD,
+#           its state will change from '2' to '3'. tcounter will be resetted to 0.
+
 function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
         if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
@@ -297,14 +353,14 @@ end
 #           The values of the nodes that have an initial excitation.
 #   @post   The embedded MetaGraph has the property state imposed on the nodes.
 #           The state of all nodes except the values in startwaarden are set to
-#           '1' by default. Whilst the rest are set to '2.'
+#           '1' by default. Whilst the values in startwaarden are set to '2.'
 #   @post   The embedded MetaGraph has the property tcounter imposed on the nodes.
 #           (tcounter - time counter) this is set to one hundred in the start
 #           to put the model in its steady state.
 #   @post   The embedded MetaGraph has the property CV imposed on the nodes.
-#           (CV - conduction velocity) TODO
+#           (CV - conduction velocity) The default setting of this property is TODO
 #   @post   The embedded MetaGraph has the property APD imposed on the nodes.
-#           (APD - action potential duration) TODO
+#           (APD - action potential duration) The default setting of this property is TODO
 #   @post   The embedded MetaGraph has the property ltransition imposed on the edges.
 #           (ltransition - lower transition) This is the fraction of the
 #           conduction in the edge going from the lower numbered node to
@@ -314,7 +370,7 @@ end
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1)...)#,tDisp = 100, tSamp = 100)...)
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=25,δx=1)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
@@ -331,9 +387,9 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
         CV = get_prop(graph,node,:CV)
         for buur in collect(neighbors(graph, node))
             if buur < node
-                set_prop!(graph,buur,node,:htransition,CV)
+                set_prop!(graph,buur,node,:htransition,10^(-10))
             else
-                set_prop!(graph,node,buur,:ltransition,CV)
+                set_prop!(graph,node,buur,:ltransition,10^(-10))
             end
         end
     end
@@ -423,7 +479,7 @@ function main()
     startwaarden = [1, 50, 124, 245, 378, 472, 596, 632, 780, 875]
     celAutom = createCellulaireAutomaat(graph, startwaarden)
     folder="plotjes_test4"
-    createFrames(folder,250,250,celAutom)
+    createFrames(folder,20,20,celAutom)
     elapsed = time() - start
     println(elapsed)
 end
