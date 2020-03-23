@@ -150,20 +150,12 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::I
                         markersize = 4, linewidth=2, curves=false)
         p = plot(g2,show=true,grid=false,showaxis=false)
         png(p, "$folder/3Dframe$i.png")
-        for edge in collect(filter_edges(celAutom.mg,:htransition,-1))
-            set_prop!(celAutom.mg,edge,:ltransition,0)
-            set_prop!(celAutom.mg,edge,:htransition,0)
-        end
     elseif dim == 2
         nodefillc = coloringGraph(celAutom)
         edgefillc =coloringEdge(celAutom)
         loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
         g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
         draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
-        for edge in collect(filter_edges(celAutom.mg,:ltransition,-1))
-            set_prop!(celAutom.mg,edge,:ltransition,0)
-            set_prop!(celAutom.mg,edge,:htransition,0)
-        end
     end
 end
 ##
@@ -449,6 +441,10 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
+        end
+        for edge in collect(filter_edges(celAutom.mg,:ltransition,-1))
+            set_prop!(celAutom.mg,edge,:ltransition,0)
+            set_prop!(celAutom.mg,edge,:htransition,0)
         end
                                     #TODO title plot with celAutom.time
         celAutom.time+=celAutom.δt
