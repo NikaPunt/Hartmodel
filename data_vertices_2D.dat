@@ -1,4 +1,4 @@
-vertices,:celtype,:loc_x,:loc_y,:loc_z,:u,:v
+vertices,celtype,loc_x,loc_y,loc_z,u,v
 1.0,1.0,1.0,1.0,1.0,0.0,0.0
 2.0,1.0,1.0,2.0,1.0,0.0,0.0
 3.0,1.0,1.0,3.0,1.0,0.0,0.0

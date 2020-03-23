@@ -134,17 +134,36 @@ end
 #           this is the name of the folder used to store the pictures. If it
 #           exists it doesn't attempt to make a new one. If it doesn't exist,
 #           the directory will be created.
+#   @param  (Int64) dim
+#           the dimension of the graph. Can be either 2 or 3.
 #   @post   Generates an image of the colored MetaGraph object using the gplot
 #           function and stored as $folder/frame$i.png.
-function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
-    nodefillc = coloringGraph(celAutom)
-    edgefillc =coloringEdge(celAutom)
-    loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-    g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
-    draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
-    for edge in collect(filter_edges(celAutom.mg,:ltransition,-1))
-        set_prop!(celAutom.mg,edge,:ltransition,0)
-        set_prop!(celAutom.mg,edge,:htransition,0)
+#   @post   If dim = 2 this will generate a plot of a 2D graph.
+#   @post   If dim = 3 this will generate a plot of a 3D graph.
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::Int64)
+    if dim == 3
+        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+        nodefillc = coloringGraph(celAutom)
+        edgefillc =coloringEdge(celAutom)
+        g2 = graphplot(celAutom.mg,dim=3, x = loc_x, y=loc_y, z=loc_z,
+                        markercolor = nodefillc, linecolor = :black,
+                        markersize = 4, linewidth=2, curves=false)
+        p = plot(g2,show=true,grid=false,showaxis=false)
+        png(p, "$folder/3Dframe$i.png")
+        for edge in collect(filter_edges(celAutom.mg,:htransition,-1))
+            set_prop!(celAutom.mg,edge,:ltransition,0)
+            set_prop!(celAutom.mg,edge,:htransition,0)
+        end
+    elseif dim == 2
+        nodefillc = coloringGraph(celAutom)
+        edgefillc =coloringEdge(celAutom)
+        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+        g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+        draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
+        for edge in collect(filter_edges(celAutom.mg,:ltransition,-1))
+            set_prop!(celAutom.mg,edge,:ltransition,0)
+            set_prop!(celAutom.mg,edge,:htransition,0)
+        end
     end
 end
 ##
@@ -165,12 +184,12 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
         transitionArray = Array{Symbol,1}
         transitionArray=[:ltransition]
         edgeMatrix = Array{Int64,2}
-        edgeMatrix = [[edge.src edge.dst];]
+        edgeMatrix = [[min(edge.src, edge.dst) max(edge.src, edge.dst)];]
     else
         transitionArray = Array{Symbol,1}
         transitionArray= [:htransition]
         edgeMatrix =  Array{Int64,2}
-        edgeMatrix = [[edge.dst edge.src];]
+        edgeMatrix = [[max(edge.src, edge.dst) min(edge.src, edge.dst)];]
     end
     #transitionSide als nx2 matrix met start en end node
     while edgeMatrix!=Array{Int64}(undef,0,2)
@@ -182,7 +201,7 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
             #Conduction velocity CV
             CV = get_prop(celAutom.mg,edgeSide[1],:CV)
             #De dx in de file
-            dx = get_prop(celAutom.mg,edgeSide[1],edgeSide[2],Symbol(":dx"))#length of the edge in s.u.
+            dx = get_prop(celAutom.mg,edgeSide[1],edgeSide[2],:dx)#length of the edge in s.u.
             #We look at the fraction of the dx in the next period and if it is lower then 100%
             if transitionProp + CV/dx < 1
                 set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,transitionProp + CV/dx)
@@ -279,6 +298,7 @@ function state1to2!(celAutom::CellulaireAutomaat)
     for edge in collect(setdiff(C, intersect(D, E)))
         #ltransition = kant van de edge met de lager genummerde vertex
         #htransition = kant van de edge met de hoger genummerde vertex
+        # println("$edge has ltransition \n$(get_prop(celAutom.mg, edge, :ltransition))\nand htransition\n$(get_prop(celAutom.mg, edge, :htransition))")
         if get_prop(celAutom.mg,edge,:ltransition) == 0
             makeTransition!(celAutom, edge, false)
         elseif get_prop(celAutom.mg,edge,:htransition) == 0
@@ -370,7 +390,7 @@ end
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=25,δx=1)...)#,tDisp = 100, tSamp = 100)...)
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
@@ -414,18 +434,18 @@ end
 #   @post   #amount frames will be made. Each time by calling an updateState to
 #           go to the next state and then calling plotGraph2 to plot the graph.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
-                        celAutom::CellulaireAutomaat)
+                        celAutom::CellulaireAutomaat, dim::Int64)
     #this calculates timesteps until we have the amount of necessary frames
     try
         mkdir(folderName)
     catch
     end
-    plotGraph2(celAutom,0,folderName)
+    plotGraph2(celAutom,0,folderName, dim)
     printIndex=floor(amountCalcs/amountFrames)
     for i in range(1,stop=amountCalcs)
         updateState!(celAutom)
         if mod(i,printIndex)==0
-            plotGraph2(celAutom,Int64(i/printIndex),folderName)
+            plotGraph2(celAutom,Int64(i/printIndex),folderName, dim)
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
@@ -476,10 +496,11 @@ end
 function main()
     start = time()
     graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
-    startwaarden = [1, 50, 124, 245, 378, 472, 596, 632, 780, 875]
+    startwaarden = [278,568]
     celAutom = createCellulaireAutomaat(graph, startwaarden)
     folder="plotjes_test4"
-    createFrames(folder,20,20,celAutom)
+    dim = 2
+    createFrames(folder,75,150,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end

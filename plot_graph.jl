@@ -54,7 +54,7 @@ end
 function colorize(mg::MetaGraph,levels::Array{Float64,1})
     col = zeros(Int,nv(mg))
     for vi in collect(vertices(mg))
-        u = get_prop(mg,vi,Symbol(":u"))
+        u = get_prop(mg,vi,:u)
         col[Int(vi)] = searchsortedfirst(levels,u)
     end
     return col
@@ -73,9 +73,9 @@ function get_coordinates(mg::MetaGraph)
     loc_y = zeros(nv(mg))
     loc_z = zeros(nv(mg))
     for i in range(1,stop=nv(mg))
-        loc_x[i] = get_prop(mg,i,Symbol(":loc_x"))
-        loc_y[i] = get_prop(mg,i,Symbol(":loc_y"))
-        loc_z[i] = get_prop(mg,i,Symbol(":loc_z"))
+        loc_x[i] = get_prop(mg,i,:loc_x)
+        loc_y[i] = get_prop(mg,i,:loc_y)
+        loc_z[i] = get_prop(mg,i,:loc_z)
     end
     return loc_x,loc_y,loc_z
 end
@@ -141,7 +141,7 @@ end
 function ecg(g::MetaGraph)
     sum_u = 0
     for i in range(1,stop=nv(g))
-        sum_u += get_prop(g,i,Symbol(":u"))
+        sum_u += get_prop(g,i,:u)
     end
     return sum_u
 end
