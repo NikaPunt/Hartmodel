@@ -191,24 +191,27 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
             #Als ltransition nul is nemen we de htransition.
             transitionProp= get_prop(celAutom.mg,edge,transitionSide)
             #Conduction velocity CV
-            CV = get_prop(celAutom.mg,edgeSide[1],:CV)
+            CV = get_prop(celAutom.mg,edgeSide[1],:CV)#s.u. per t.u. (without anisotropy)
             #De dx in de file
             dx = get_prop(celAutom.mg,edgeSide[1],edgeSide[2],:dx)#length of the edge in s.u.
+            #anysotropy
+            anisotropy=get_prop(celAutom.mg, edgeSide[1],edgeSide[2],:anisotropy)
             #We look at the fraction of the dx in the next period and if it is lower then 100%
-            if transitionProp + CV/dx < 1
-                set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,transitionProp + CV/dx)
+            if transitionProp + CV/dx*anisotropy <= 1
+                set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,transitionProp + CV/dx*anisotropy)
             else
-                surplus = transitionProp*dx + CV - dx #surplus in s.u. over the edge
+                surplus = transitionProp*dx + CV*anisotropy - dx #surplus in s.u. over the edge (with anisotropy)
                 for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[2]),edgeSide[1]))
-                    if (get_prop(celAutom.mg,node,:state)==2&&get_prop(celAutom.mg, node,:tcounter)!=0)||get_prop(celAutom.mg,node,:state)==3
+                    if get_prop(celAutom.mg,node,:state)==2#(&&get_prop(celAutom.mg, node,:tcounter)!=0)||get_prop(celAutom.mg,node,:state)==3
                         surplus2 = 0
                     else
+                        anisotropy2=get_prop(celAutom.mg,node, edgeSide[2],:anisotropy)
                         #Fraction in time in first edge = surplus/CV
-                        #We get the distance by multiplying with the CV of the other edge
-                        surplus2=surplus/CV*get_prop(celAutom.mg,edgeSide[2],:CV)
+                        #We get the distance by multiplying with the CV of the other edge (with anisotropy)
+                        surplus2=surplus/CV*get_prop(celAutom.mg,edgeSide[2],:CV)/anisotropy*anisotropy2
                     end
                     #When the fraction is smaller than 100% we set the transition
-                    if surplus2/dx<1
+                    if surplus2/dx<=1
                         if node < edgeSide[2]&&get_prop(celAutom.mg,node,edgeSide[2],
                         :ltransition)==0
                             set_prop!(celAutom.mg,node,edgeSide[2],:htransition,
@@ -235,15 +238,16 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
                                     set_prop!(celAutom.mg,node,:tcounter,0)
                                 end
                                 #there is an ltransition
+                                anisotropy3=get_prop(celAutom.mg,node, node2,:anisotropy)
                                 if node<node2&&get_prop(celAutom.mg, node,node2,:htransition)==0
                                     transitionArray=[transitionArray;:ltransition]
                                     set_prop!(celAutom.mg, node, node2, :ltransition,
-                                        get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)
+                                        ((get_prop(celAutom.mg, node, edgeSide[2],transitionSide))-1)/anisotropy2*anisotropy3)
                                 #htransition
                                 elseif node>node2&&get_prop(celAutom.mg, node,node2,:ltransition)==0
                                     transitionArray=[transitionArray;:htransition]
                                     set_prop!(celAutom.mg, node, node2, :htransition,
-                                        get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)
+                                        (get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)/anisotropy2*anisotropy3)
                                 else
                                     set_prop!(celAutom.mg,node, node2, :ltransition,-1)
                                 end
