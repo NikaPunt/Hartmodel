@@ -242,12 +242,14 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
                                 if node<node2&&get_prop(celAutom.mg, node,node2,:htransition)==0
                                     transitionArray=[transitionArray;:ltransition]
                                     set_prop!(celAutom.mg, node, node2, :ltransition,
-                                        ((get_prop(celAutom.mg, node, edgeSide[2],transitionSide))-1)/anisotropy2*anisotropy3)
+                                        ((get_prop(celAutom.mg, node, edgeSide[2],transitionSide))-1)/anisotropy2*anisotropy3
+                                            /get_prop(celAutom.mg,edgeSide[2],:CV)*get_prop(celAutom.mg,node,node2,:CV))
                                 #htransition
                                 elseif node>node2&&get_prop(celAutom.mg, node,node2,:ltransition)==0
                                     transitionArray=[transitionArray;:htransition]
                                     set_prop!(celAutom.mg, node, node2, :htransition,
-                                        (get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)/anisotropy2*anisotropy3)
+                                        (get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)/anisotropy2*anisotropy3
+                                            /get_prop(celAutom.mg,edgeSide[2],:CV)*get_prop(celAutom.mg,node,node2,:CV))
                                 else
                                     set_prop!(celAutom.mg,node, node2, :ltransition,-1)
                                 end
