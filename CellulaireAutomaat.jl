@@ -202,7 +202,7 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
             else
                 surplus = transitionProp*dx + CV*anisotropy - dx #surplus in s.u. over the edge (with anisotropy)
                 for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[2]),edgeSide[1]))
-                    if get_prop(celAutom.mg,edgeSide[2],:state)==2#(&&get_prop(celAutom.mg, node,:tcounter)!=0)||get_prop(celAutom.mg,node,:state)==3
+                    if get_prop(celAutom.mg,edgeSide[2],:state)==2||get_prop(celAutom.mg,edgeSide[2],:state)==3
                         surplus2 = 0
                     else
                         anisotropy2=get_prop(celAutom.mg,node, edgeSide[2],:anisotropy)
@@ -371,6 +371,7 @@ end
 #           The values of the nodes that have an initial excitation.
 #   @param (Array{Int64, 1}) stopwaarden
 #           The values of the nodes that can't be depolarised in te inital condition
+#   @pre    stopwaarden and startwaarden don't have common values 
 #   @post   The embedded MetaGraph has the property state imposed on the nodes.
 #           The state of all nodes except the values in startwaarden are set to
 #           '1' by default. Whilst the values in startwaarden are set to '2.'
@@ -509,7 +510,7 @@ function main()
     celAutom = createCellulaireAutomaat(graph, startwaarden,stopwaarden)
     folder="plotjes_test4"
     dim = 2
-    createFrames(folder,200,400,celAutom, dim)
+    createFrames(folder,300,600,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
