@@ -202,7 +202,7 @@ function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleG
             else
                 surplus = transitionProp*dx + CV*anisotropy - dx #surplus in s.u. over the edge (with anisotropy)
                 for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[2]),edgeSide[1]))
-                    if get_prop(celAutom.mg,node,:state)==2#(&&get_prop(celAutom.mg, node,:tcounter)!=0)||get_prop(celAutom.mg,node,:state)==3
+                    if get_prop(celAutom.mg,edgeSide[2],:state)==2#(&&get_prop(celAutom.mg, node,:tcounter)!=0)||get_prop(celAutom.mg,node,:state)==3
                         surplus2 = 0
                     else
                         anisotropy2=get_prop(celAutom.mg,node, edgeSide[2],:anisotropy)
@@ -369,6 +369,8 @@ end
 #           The graph to be embedded in the new cellular automaton.
 #   @param  (Array{Int64, 1}) startwaarden
 #           The values of the nodes that have an initial excitation.
+#   @param (Array{Int64, 1}) stopwaarden
+#           The values of the nodes that can't be depolarised in te inital condition
 #   @post   The embedded MetaGraph has the property state imposed on the nodes.
 #           The state of all nodes except the values in startwaarden are set to
 #           '1' by default. Whilst the values in startwaarden are set to '2.'
@@ -387,7 +389,7 @@ end
 #           (ltransition - higher transition) This is the fraction of the
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
-function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1})
+function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1},stopwaarden::Array{Int64,1})
     celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
@@ -402,7 +404,6 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
     for node in startwaarden
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,0)
-        CV = get_prop(graph,node,:CV)
         for buur in collect(neighbors(graph, node))
             if buur < node
                 set_prop!(graph,buur,node,:htransition,10^(-10))
@@ -410,6 +411,10 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
                 set_prop!(graph,node,buur,:ltransition,10^(-10))
             end
         end
+    end
+    for node in stopwaarden
+        set_prop!(graph,node,:state,2)
+        set_prop!(graph,node,:tcounter,0)
     end
     return celAutom
 end
@@ -498,11 +503,13 @@ end
 function main()
     start = time()
     graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
-    startwaarden = [278,568]
-    celAutom = createCellulaireAutomaat(graph, startwaarden)
+    startwaarden = [15,45,75,105,135,165,195,225,255,285,315,345,375,405]
+    stopwaarden = [14,44,74,104,134,164,194,224,254,284,314,344,374,404]
+
+    celAutom = createCellulaireAutomaat(graph, startwaarden,stopwaarden)
     folder="plotjes_test4"
     dim = 2
-    createFrames(folder,75,150,celAutom, dim)
+    createFrames(folder,200,400,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
