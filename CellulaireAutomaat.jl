@@ -418,7 +418,9 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64)
 
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1)...)#,tDisp = 100, tSamp = 100)...)
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1, ARI_ss_endo=ARI_ss_endo,
+                                ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
+                                b_epi=b_epi, b_endo=b_endo)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
@@ -504,22 +506,16 @@ end
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     DI= get_prop(celAutom.mg, node, :tcounter)
     T = get_prop(celAutom.mg, node, :T)
-    print(T)
+
     #epi APD
-    celAutom.ARI_ss_epi = 242
-    celAutom.a_epi = 404
-    celAutom.b_epi = 36
-    ARI_epi = ARI_ss_epi - a_epi*exp(-DI*celAutom.δt/b_epi)#Implementation formula in ms
+    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-DI*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
     ARI_epi=ARI_epi/celAutom.δt#ms -> t.u
 
     #endo APD
-    celAutom.ARI_ss_endo = 250
-    celAutom.a_endo = 500
-    celAutom.b_endo = 36
-    ARI_endo = ARI_ss_endo - a_endo*exp(-DI*celAutom.δt/b_endo)#Implementation formula in ms
+    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-DI*celAutom.δt/celAutom.b_endo)#Implementation formula in ms
     ARI_endo=ARI_endo/celAutom.δt#ms -> t.u
 
-    #Onze APD
+    #Real APD
     ARI = ARI_endo*(1-T) + ARI_epi*T
     set_prop!(celAutom.mg,node,:APD, ARI)
 end
@@ -548,15 +544,15 @@ function main()
     stopwaarden = [14,44,74,104,134,164,194,224,254,284,314,344,374,404]
 
     #epi APD
-    ARI_ss_epi = 242
-    a_epi = 404
-    b_epi = 36
+    ARI_ss_epi = Float64(242)
+    a_epi = Float64(404)
+    b_epi = Float64(36)
 
 
     #endo APD
-    ARI_ss_endo = 250
-    a_endo = 500
-    b_endo = 36
+    ARI_ss_endo = Float64(250)
+    a_endo = Float64(500)
+    b_endo = Float64(36)
 
 
 
