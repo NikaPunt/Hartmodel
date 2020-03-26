@@ -13,6 +13,15 @@ mutable struct CellulaireAutomaat
     time::Int64
     δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
     δx::Float64 #the space unit in cm -> 1 s.u. = δx cm
+
+    ARI_ss_epi::Float64
+    ARI_ss_endo::Float64
+
+    a_epi::Float64
+    a_endo::Float64
+
+    b_epi::Float64
+    b_endo::Float64
 end
 
 ##
@@ -371,7 +380,21 @@ end
 #           The values of the nodes that have an initial excitation.
 #   @param (Array{Int64, 1}) stopwaarden
 #           The values of the nodes that can't be depolarised in te inital condition
-#   @pre    stopwaarden and startwaarden don't have common values 
+#
+#   The next six parameters are parameters of the formula APD = ARI_ss - a*exp(-DI*celAutom.δt/b)
+#   @param  (Float64) ARI_ss_epi
+#           The steady state ARI of the epicardium
+#   @param  (Float64) ARI_ss_endo
+#           The steady state ARI of the endocardium
+#   @param  (Float64) a_epi
+#           The a coefficient in the formula for the epicardium
+#   @param  (Float64) a_endo
+#           The a coefficient in the formula for the endocardium
+#   @param  (Float64) b_epi
+#           The b coefficient in the formula for the epicardium
+#   @param  (Float64) b_endo
+#           The b coefficient in the formula for the endocardium
+#   @pre    stopwaarden and startwaarden don't have common values
 #   @post   The embedded MetaGraph has the property state imposed on the nodes.
 #           The state of all nodes except the values in startwaarden are set to
 #           '1' by default. Whilst the values in startwaarden are set to '2.'
@@ -390,7 +413,11 @@ end
 #           (ltransition - higher transition) This is the fraction of the
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
-function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1},stopwaarden::Array{Int64,1})
+function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1},
+                                    stopwaarden::Array{Int64,1}, ARI_ss_endo::Float64,
+                                    ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
+                                    b_epi::Float64, b_endo::Float64)
+
     celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
@@ -476,11 +503,24 @@ end
 #           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     DI= get_prop(celAutom.mg, node, :tcounter)
-    ARI_ss = 242
-    a = 404
-    b = 36
-    ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)#Implementation formula in ms
-    ARI=ARI/celAutom.δt#ms -> t.u
+    T = get_prop(celAutom.mg, node, :T)
+    print(T)
+    #epi APD
+    celAutom.ARI_ss_epi = 242
+    celAutom.a_epi = 404
+    celAutom.b_epi = 36
+    ARI_epi = ARI_ss_epi - a_epi*exp(-DI*celAutom.δt/b_epi)#Implementation formula in ms
+    ARI_epi=ARI_epi/celAutom.δt#ms -> t.u
+
+    #endo APD
+    celAutom.ARI_ss_endo = 250
+    celAutom.a_endo = 500
+    celAutom.b_endo = 36
+    ARI_endo = ARI_ss_endo - a_endo*exp(-DI*celAutom.δt/b_endo)#Implementation formula in ms
+    ARI_endo=ARI_endo/celAutom.δt#ms -> t.u
+
+    #Onze APD
+    ARI = ARI_endo*(1-T) + ARI_epi*T
     set_prop!(celAutom.mg,node,:APD, ARI)
 end
 ##
@@ -503,11 +543,26 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("data_vertices_2D.dat", "data_edges_2D.dat", ',')
+    graph = constructGraph("data_vertices_2D_met_T.dat", "data_edges_2D.dat", ',')
     startwaarden = [15,45,75,105,135,165,195,225,255,285,315,345,375,405]
     stopwaarden = [14,44,74,104,134,164,194,224,254,284,314,344,374,404]
 
-    celAutom = createCellulaireAutomaat(graph, startwaarden,stopwaarden)
+    #epi APD
+    ARI_ss_epi = 242
+    a_epi = 404
+    b_epi = 36
+
+
+    #endo APD
+    ARI_ss_endo = 250
+    a_endo = 500
+    b_endo = 36
+
+
+
+    celAutom = createCellulaireAutomaat(graph, startwaarden,stopwaarden,
+                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+
     folder="plotjes_test4"
     dim = 2
     createFrames(folder,300,600,celAutom, dim)
