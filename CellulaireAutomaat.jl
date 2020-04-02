@@ -2,6 +2,7 @@
 using LightGraphs
 using MetaGraphs
 using DelimitedFiles
+using DataStructures
 include("plot_graph.jl")
 
 mutable struct CellulaireAutomaat
@@ -22,6 +23,9 @@ mutable struct CellulaireAutomaat
 
     b_epi::Float64
     b_endo::Float64
+
+    #transitions of the active edges
+    edgesA::PriorityQueue{Tuple{Int64,Int64}, Float64}
 end
 
 ##
@@ -122,7 +126,7 @@ function coloringEdge(celAutom::CellulaireAutomaat)
     for i in range(1,stop=ne(celAutom.mg))
         if membership[i] in [1 2 3 4 5 6]
         else
-            println("Probleempje")
+            println("Probleempje $(membership[i])")
             membership[i]=7
         end
     end
@@ -170,139 +174,132 @@ end
 ##
 #   canTransitionInto will return false if and only if conduction can not travel
 #   to the given node. This is a simple check of the node's state.
-function canTransitionInto(celAutom::CellulaireAutomaat, node::Int64)
+function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64)
     if get_prop(celAutom.mg,node,:state)==2||get_prop(celAutom.mg,node,:state)==3
         return false
     end
     return true
 end
 ##
-#   This function can be called upon when ltransition or htransition equals to 0
-#   and computes the transition of the wavefront in one time unit
+#   makeTransition will add the CV*anistropy/dx to every edge with a running
+#   current. (No attention given to surpluses yet.)
 #
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
-#           type MetaGraph.
-#   @param  (LightGraphs.SimpleGraphs.SimpleEdge{Int64}) edge
-#           The edge over which the ltransition or htransition changes
-#   @param  (Bool) direction
-#           true when there is an ltransition
-#           false when there is an htransition
-#   @post   The conduction fraction in the edge will be updated.
-function makeTransition!(celAutom::CellulaireAutomaat, edge::LightGraphs.SimpleGraphs.SimpleEdge{Int64},direction::Bool)
-    if direction #als htransition nul is en ltransition niet nul
-        transitionArray = Array{Symbol,1}
-        transitionArray=[:ltransition]
-        edgeMatrix = Array{Int64,2}
-        edgeMatrix = [[min(edge.src, edge.dst) max(edge.src, edge.dst)];]
-    else #als ltransition nul is en htransition niet nul
-        transitionArray = Array{Symbol,1}
-        transitionArray= [:htransition]
-        edgeMatrix =  Array{Int64,2}
-        edgeMatrix = [[max(edge.src, edge.dst) min(edge.src, edge.dst)];]
-    end
-    #transitionSide als nx2 matrix met start en end node
-    while edgeMatrix!=Array{Int64}(undef,0,2)
-        for i in size(transitionArray,1):-1:1
-            edgeSide=edgeMatrix[i,:]
-            transitionSide=transitionArray[i]
-            #Als ltransition nul is nemen we de htransition.
-            transitionProp= get_prop(celAutom.mg,edge,transitionSide)
-            #Conduction velocity CV
-            CV = get_prop(celAutom.mg,edgeSide[1],:CV)#s.u. per t.u. (without anisotropy)
-            #De dx in de file
-            dx = get_prop(celAutom.mg,edgeSide[1],edgeSide[2],:dx)#length of the edge in s.u.
-            #anysotropy
-            anisotropy=get_prop(celAutom.mg, edgeSide[1],edgeSide[2],:anisotropy)
-            #We look at the fraction of the dx in the next period and if it is lower then 100%
-            if transitionProp + CV/dx*anisotropy <= 1
-                set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,transitionProp + CV/dx*anisotropy)
-            else
-                surplus = transitionProp*dx + CV*anisotropy - dx #surplus in s.u. over the edge (with anisotropy)
-                for node in collect(setdiff(neighbors(celAutom.mg,edgeSide[2]),edgeSide[1]))
-                    if canTransitionInto(celAutom, edgeSide[2]) == false
-                        surplus2 = 0
-                    else
-                        anisotropy2=get_prop(celAutom.mg,node, edgeSide[2],:anisotropy)
-                        #Fraction in time in first edge = surplus/CV
-                        #We get the distance by multiplying with the CV of the other edge (with anisotropy)
-                        surplus2=surplus/CV*get_prop(celAutom.mg,edgeSide[2],:CV)/anisotropy*anisotropy2
-                    end
-                    #When the fraction is smaller than 100% we set the transition
-                    #######################################################################################
-                    #TODO dit was eerst /dx en niet /dx2, was dat toch juist want dat klonk niet logisch??#
-                    #######################################################################################
-                    dx2 = get_prop(celAutom.mg,node,edgeSide[2],:dx)
-                    if surplus2/dx2<=1
-                        #If the neighbouring node is the smaller numbered node and ltransition is 0
-                        #Add the surplus to htransition.
-                        if node < edgeSide[2]&&get_prop(celAutom.mg,node,edgeSide[2],
-                        :ltransition)==0
-                            set_prop!(celAutom.mg,node,edgeSide[2],:htransition,
-                                max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[2],
-                                :htransition)))
-                        #else if the neighbouring node is the larger numbered node and htransition is 0
-                        #add the surplus to ltransition.
-                        elseif get_prop(celAutom.mg,node,edgeSide[2],
-                        :htransition)==0
-                            set_prop!(celAutom.mg,node,edgeSide[2],:ltransition,
-                                max(surplus2/dx,get_prop(celAutom.mg,node,edgeSide[2],
-                                :ltransition)))
-                        else
-                        #In the other case, both ltransition and htransition are non-zero and need to be
-                        #set to -1
-                            set_prop!(celAutom.mg,node,edgeSide[2],:ltransition,-1)
-                        end
-                    #If surplus2 exceeds 100% of the length of the second edge.
-                    else
-                        #we add the extra paths into the matrix
-                        #and give them according transition properties
-                        for node2 in collect(setdiff(neighbors(celAutom.mg,node),edgeSide[2]))
-                            if get_prop(celAutom.mg, node2, :state)==1#||(get_prop(celAutom.mg, node2,:state)==2&&get_prop(celAutom.mg, node,:tcounter)==0)
-                                edgeMatrix=[edgeMatrix;node node2]#Flow goes from node to node2
-                                set_prop!(celAutom.mg,node,:state,2)
-                                if get_prop(celAutom.mg,node,:tcounter)!=0
-                                    set_APD!(celAutom,node)
-                                    set_CV!(celAutom,node)
-                                    set_prop!(celAutom.mg,node,:tcounter,0)
-                                end
-                                #there is an ltransition
-                                anisotropy3=get_prop(celAutom.mg,node, node2,:anisotropy)
-                                if node<node2&&get_prop(celAutom.mg, node,node2,:htransition)==0
-                                    transitionArray=[transitionArray;:ltransition]
-                                    set_prop!(celAutom.mg, node, node2, :ltransition,
-                                        ((get_prop(celAutom.mg, node, edgeSide[2],transitionSide))-1)/anisotropy2*anisotropy3
-                                            /get_prop(celAutom.mg,edgeSide[2],:CV)*get_prop(celAutom.mg,node,node2,:CV))
-                                #htransition
-                                elseif node>node2&&get_prop(celAutom.mg, node,node2,:ltransition)==0
-                                    transitionArray=[transitionArray;:htransition]
-                                    set_prop!(celAutom.mg, node, node2, :htransition,
-                                        (get_prop(celAutom.mg, node, edgeSide[2],transitionSide)-1)/anisotropy2*anisotropy3
-                                            /get_prop(celAutom.mg,edgeSide[2],:CV)*get_prop(celAutom.mg,node,node2,:CV))
-                                else
-                                    set_prop!(celAutom.mg,node, node2, :ltransition,-1)
-                                end
-                            end
-                        end
-                        set_prop!(celAutom.mg,edgeSide[1],node,transitionSide,0)
-                    end
-                end
-                if get_prop(celAutom.mg, edgeSide[2], :state)==1
-                    set_prop!(celAutom.mg,edgeSide[2],:state,2)
-                    set_APD!(celAutom,edgeSide[2])
-                    set_CV!(celAutom,edgeSide[2])
-                    set_prop!(celAutom.mg,edgeSide[2],:tcounter,0)
-                end
-                set_prop!(celAutom.mg,edgeSide[1],edgeSide[2],transitionSide,0)
-            end
-            #remove edge i from matrix
-            index=[1:(i-1);(i+1):size(transitionArray,1)]
-            transitionArray=transitionArray[index,:]
-            edgeMatrix=edgeMatrix[index,:]
-        end
+#           type MetaGraph and a priority queue with all the edges that must undergo
+#           the transition
+#   @post   The conduction fraction in the edge will be updated with
+#           old_conduction_fraction + CV*ani/dx
+function makeTransition!(celAutom::CellulaireAutomaat)
+    for key in keys(celAutom.edgesA)
+        CV = get_prop(celAutom.mg, key[1], :CV)
+        ani = get_prop(celAutom.mg, key[1], key[2], :anisotropy)
+        dx = get_prop(celAutom.mg, key[1],key[2],:dx)
+        set_prop!(celAutom.mg, key[1],key[2],getTransition(key),celAutom.edgesA[key]+ CV*ani/dx)
+        celAutom.edgesA[key]+= CV*ani/dx
     end
 end
+##
+#   getTransition returns the key :ltransition if the first node in the tuple
+#   has a lower number than the second, and :htransition if it is larger.
+#
+#   @param  (Tuple{Int64,Int64}) nodeTuple
+#           A tuple that contains the source node as first element and destination
+#           node as second element
+function getTransition(nodeTuple::Tuple{Int64,Int64})
+    if nodeTuple[1] < nodeTuple[2]
+        return :ltransition
+    end
+    return :htransition
+end
+##
+#   activate sets the node on state 2 and the tcounter on 0, recalculates CV
+#   APD
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph and a priority queue with all the edges that must undergo
+#           the transition
+#   @param  (Int64) node
+#           The (number of the) node which has to be activated
+#   @post   Will set the property state of node on 2 and the property tcounter of
+#           node on 0
+function activate!(celAutom::CellulaireAutomaat, node::Int64, timeFraction::Float64)
+    set_prop!(celAutom.mg, node, :state, 2)
+    set_prop!(celAutom.mg, node, :tcounter, get_prop(celAutom.mg, node, :tcounter)+timeFraction)
+    set_APD!(celAutom,node)
+    set_CV!(celAutom,node)
+    set_prop!(celAutom.mg, node, :tcounter, 0)
+end
+##
+#   canActivateEdge returns true if and only if there is no running current from
+#   there to here. This means that a current can go from here to there.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#   @param  (Int64) here
+#           The node from which the edge activation should start from
+#   @param  (Int64) there
+#           The other side of the edge
+function canActivateEdge(celAutom::CellulaireAutomaat, here::Int64, there::Int64)
+    if here < there
+        return (get_prop(celAutom.mg, here, there, :htransition) == 0)
+    elseif there < here
+        return (get_prop(celAutom.mg, here, there, :ltransition) == 0)
+    end
+end
+##
+#   handleSurplus is where we use the PriorityQueue embedded in the mutable struct
+#   to handle the surplus in any edges that have a conduction fraction above 1.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph and a priority queue with all the edges that must undergo
+#           the transition
+#   @post   for all edges with a transition more than 1, we take that surplus and
+#           add it to the neighbouring edges
+#   TODO
+#   2.  De fractie van de tijdstap berekenen om toe te voegen aan tcounter voor
+#       de APD met de juiste edge
 
+function handleSurplus(celAutom::CellulaireAutomaat)
+    #als grootste transition groter is dan 1
+    while (!isempty(celAutom.edgesA))&&peek(celAutom.edgesA)[2] > 1
+        surplus=peek(celAutom.edgesA)[2]-1#fraction surplus with anistropy
+        key=dequeue!(celAutom.edgesA)
+        if canPassCurrentTo(celAutom, key[2])
+            #properties of current edge
+            dx=get_prop(celAutom.mg, key[1],key[2],:dx)
+            ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
+            CV=get_prop(celAutom.mg,key[1],:CV)
+            #activate node
+            activate!(celAutom, key[2],1-surplus/CV)
+            #go to next edges and set transition
+            for node in collect(setdiff(neighbors(celAutom.mg,key[2]),key[1]))
+                if canActivateEdge(celAutom,key[2],node)
+                    transtitionsSide = getTransition((key[2],node))
+                    currentTransistion =  get_prop(celAutom.mg, key[2],node,transtitionsSide)
+                    #get different properties of new edge
+                    dx2=get_prop(celAutom.mg, key[2],node,:dx)
+                    ani2=get_prop(celAutom.mg,key[2],node,:anisotropy)
+                    CV2=get_prop(celAutom.mg,key[2],:CV)
+                    #calculate the new transition
+                    newTransition = surplus*dx/dx2*ani2/ani*CV2/CV
+                    #set the transition on the max of the current and new transition
+                    set_prop!(celAutom.mg,key[2],node,transtitionsSide,max(newTransition,currentTransistion))
+                    enqueue!(celAutom.edgesA,(key[2], node),max(newTransition,currentTransistion))
+                else
+                    set_prop!(celAutom.mg,key[2],node,:ltransition,-1)
+                    try
+                        delete!(celAutom.edgesA,(node,key[2]))
+                    catch
+                    end
+                end
+            end
+        end
+        set_prop!(celAutom.mg,key[1],key[2],:ltransition,0)
+        set_prop!(celAutom.mg,key[1],key[2],:htransition,0)
+    end
+end
 ##
 #   state1to2! looks at the MetaGraph object embedded in the given
 #   CellulaireAutomaat object (celAutom) and evaluates every single node.
@@ -316,25 +313,10 @@ end
 #           or htransition high enough to excite the node, the state of this node
 #           will change from '1' to '2'.
 function state1to2!(celAutom::CellulaireAutomaat)
-    C = Set{Any}(collect(edges(celAutom.mg))) #alle edges
-    D = Set{Any}(collect(filter_edges(celAutom.mg,:ltransition,0))) #edges met ltransition nul
-    E = Set{Any}(collect(filter_edges(celAutom.mg,:htransition,0))) #edges met htransition nul
-
-    #Itereer over alle edges waar er bij minstens één kant een transitie is.
-
-    for edge in collect(setdiff(C, intersect(D, E)))
-        #ltransition = kant van de edge met de lager genummerde vertex
-        #htransition = kant van de edge met de hoger genummerde vertex
-        # println("$edge has ltransition \n$(get_prop(celAutom.mg, edge, :ltransition))\nand htransition\n$(get_prop(celAutom.mg, edge, :htransition))")
-        if get_prop(celAutom.mg,edge,:ltransition) == 0
-            makeTransition!(celAutom, edge, false)
-        elseif get_prop(celAutom.mg,edge,:htransition) == 0
-            makeTransition!(celAutom, edge, true)
-        else
-            set_prop!(celAutom.mg,edge,:ltransition,-1)
-            set_prop!(celAutom.mg,edge,:htransition,-1)
-        end
-    end
+    #bij alles cv bij (met anistropie) in uw priority
+    makeTransition!(celAutom)
+    #handleSurplus
+    handleSurplus(celAutom)
 end
 
 ##
@@ -347,7 +329,7 @@ end
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
 #   @post   If a node has been in state 2 for a time tcounter longer than its APD,
-#           its state will change from '2' to '3'. tcounter will be resetted to 0.
+#           its state will change from '2' to '3'. tcounter will be reset to 0.
 
 function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
@@ -437,10 +419,18 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
                                     stopwaarden::Array{Int64,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64)
-
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=5,δx=1, ARI_ss_endo=ARI_ss_endo,
+    Priority = PriorityQueue{Tuple{Int64,Int64}, Float64}(Base.Order.Reverse)
+    for node in startwaarden
+        for buur in collect(neighbors(graph, node))
+            #anders problemen met edges
+            if !(buur in startwaarden)
+                enqueue!(Priority,(node, buur),0)
+            end
+        end
+    end
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=10,δx=0.1, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
-                                b_epi=b_epi, b_endo=b_endo)...)#,tDisp = 100, tSamp = 100)...)
+                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
@@ -454,13 +444,6 @@ function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1}
     for node in startwaarden
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,0)
-        for buur in collect(neighbors(graph, node))
-            if buur < node
-                set_prop!(graph,buur,node,:htransition,10^(-10))
-            else
-                set_prop!(graph,node,buur,:ltransition,10^(-10))
-            end
-        end
     end
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
@@ -525,7 +508,7 @@ end
 #           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     DI= get_prop(celAutom.mg, node, :tcounter)
-    T = get_prop(celAutom.mg, node, :T)
+    T = 1#get_prop(celAutom.mg, node, :T)
 
     #epi APD
     ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-DI*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
@@ -559,29 +542,28 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("data_vertices_2D_met_T.dat", "data_edges_2D.dat", ',')
-    startwaarden = [15,45,75,105,135,165,195,225,255,285,315,345,375,405]
-    stopwaarden = [14,44,74,104,134,164,194,224,254,284,314,344,374,404]
+    graph = constructGraph("data_verticeshart.dat", "data_edgeshart.dat", ',')
+    startwaarden = [1]#5,45,75,105,135,165,195,225,255,285,315,345,375,405]
+    stopwaarden = [114]#,44,74,104,134,164,194,224,254,284,314,344,374,404]
 
     #epi APD
-    ARI_ss_epi = Float64(242)
-    a_epi = Float64(404)
-    b_epi = Float64(36)
-
+    ARI_ss_epi = Float64(392.61)
+    a_epi = Float64(339.39)
+    b_epi = Float64(520)
 
     #endo APD
-    ARI_ss_endo = Float64(250)
-    a_endo = Float64(500)
-    b_endo = Float64(36)
-
+    ARI_ss_endo = Float64(505.74)
+    a_endo = Float64(485.4)
+    b_endo = Float64(501)
 
 
     celAutom = createCellulaireAutomaat(graph, startwaarden,stopwaarden,
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
-    folder="plotjes_test4"
+
+    folder="plotjes_test2"
     dim = 2
-    createFrames(folder,300,600,celAutom, dim)
+    createFrames(folder,50,300,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
