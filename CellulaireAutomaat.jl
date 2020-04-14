@@ -174,11 +174,13 @@ end
 ##
 #   canTransitionInto will return false if and only if conduction can not travel
 #   to the given node. This is a simple check of the node's state.
-function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64)
-    if get_prop(celAutom.mg,node,:state)==2||get_prop(celAutom.mg,node,:state)==3
-        return false
+#TODO add time fraction so that when node goes from state 3 to 1 in that time,
+# it can be activated -> @param
+function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64,timeFraction::Float64)
+    if get_prop(celAutom.mg,node,:state)==1||(get_prop(celAutom.mg,node,:state)==3&&get_prop(celAutom.mg,node,:tcounter)+timeFraction>=(18.5/celAutom.δt))
+        return true
     end
-    return true
+    return false
 end
 ##
 #   makeTransition will add the CV*anistropy/dx to every edge with a running
@@ -229,7 +231,7 @@ function activate!(celAutom::CellulaireAutomaat, node::Int64, timeFraction::Floa
     set_prop!(celAutom.mg, node, :tcounter, get_prop(celAutom.mg, node, :tcounter)+timeFraction)
     set_APD!(celAutom,node)
     set_CV!(celAutom,node)
-    set_prop!(celAutom.mg, node, :tcounter, 0)
+    set_prop!(celAutom.mg, node, :tcounter, -timeFraction)
 end
 ##
 #   canActivateEdge returns true if and only if there is no running current from
@@ -266,13 +268,15 @@ function handleSurplus(celAutom::CellulaireAutomaat)
     while (!isempty(celAutom.edgesA))&&peek(celAutom.edgesA)[2] > 1
         surplus=peek(celAutom.edgesA)[2]-1#fraction surplus with anistropy
         key=dequeue!(celAutom.edgesA)
-        if canPassCurrentTo(celAutom, key[2])
-            #properties of current edge
-            dx=get_prop(celAutom.mg, key[1],key[2],:dx)
-            ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
-            CV=get_prop(celAutom.mg,key[1],:CV)
+        #properties of current edge
+        dx=get_prop(celAutom.mg, key[1],key[2],:dx)
+        ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
+        CV=get_prop(celAutom.mg,key[1],:CV)
+        #time Fraction to get to the node
+        timeFraction=1-surplus/CV
+        if canPassCurrentTo(celAutom, key[2],timeFraction)
             #activate node
-            activate!(celAutom, key[2],1-surplus/CV)
+            activate!(celAutom, key[2],timeFraction)
             #go to next edges and set transition
             for node in collect(setdiff(neighbors(celAutom.mg,key[2]),key[1]))
                 if canActivateEdge(celAutom,key[2],node)
@@ -335,7 +339,7 @@ function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
         if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,3)
-            set_prop!(celAutom.mg,node,:tcounter,0)
+            set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD))
         end
     end
 end
@@ -415,20 +419,20 @@ end
 #           (ltransition - higher transition) This is the fraction of the
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
-function createCellulaireAutomaat(graph::MetaGraph, startwaarden::Array{Int64,1},
-                                    stopwaarden::Array{Int64,1}, ARI_ss_endo::Float64,
+function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Array{Any,1},
+                                    stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64)
     Priority = PriorityQueue{Tuple{Int64,Int64}, Float64}(Base.Order.Reverse)
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
             #anders problemen met edges
-            if !(buur in startwaarden)
+            if !(buur in startwaarden)&&!(buur in stopwaarden)
                 enqueue!(Priority,(node, buur),0)
             end
         end
     end
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=10,δx=0.1, ARI_ss_endo=ARI_ss_endo,
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=2, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
                                 b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
@@ -540,11 +544,25 @@ function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
     set_prop!(celAutom.mg, node,:CV, CV)
 end
 ##
+function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64,y_stop::Float64,z_start::Float64,z_stop::Float64)
+    I = []
+    for i in range(1,stop=nv(g))
+         if x_start <= get_prop(g,i,:loc_x) <= x_stop
+             if y_start <= get_prop(g,i,:loc_y) <= y_stop
+                 if z_start <= get_prop(g,i,:loc_z) <= z_stop
+                     append!(I, i)
+                 end
+             end
+         end
+    end
+    return I
+end
+##
 function main()
     start = time()
-    graph = constructGraph("data_verticeshart.dat", "data_edgeshart.dat", ',')
-    startwaarden = [1]#5,45,75,105,135,165,195,225,255,285,315,345,375,405]
-    stopwaarden = [114]#,44,74,104,134,164,194,224,254,284,314,344,374,404]
+    graph = constructGraph("data_verticesschijf.dat", "data_edgesschijf.dat", ',')
+    startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
+    stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
@@ -556,14 +574,16 @@ function main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
+    #time step
+    dt=Int64(10)
 
-    celAutom = createCellulaireAutomaat(graph, startwaarden,stopwaarden,
+    celAutom = createCellulaireAutomaat(graph,dt, startwaarden,stopwaarden,
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
 
     folder="plotjes_test2"
-    dim = 2
-    createFrames(folder,50,300,celAutom, dim)
+    dim = 3
+    createFrames(folder,200,200,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
