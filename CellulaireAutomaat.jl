@@ -107,28 +107,22 @@ end
 #           depending on the ltransition and/or htransition in the edge.
 #           Edges recovering from excitation will be colored green.
 function coloringEdge(celAutom::CellulaireAutomaat)
-    edgecolor = [colorant"white", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
-    colorant"firebrick",colorant"green"]
+    edgecolor = [colorant"white", colorant"firebrick"]
     #ne = number of edges
     membership=ones(Int64,ne(celAutom.mg))
     j=1
     for edge in collect(edges(celAutom.mg))
-    ltransition=get_prop(celAutom.mg,edge,:ltransition)
-        if ltransition==-1
-            membership[j]=6
-            j+=1
-        else
-            htransition=get_prop(celAutom.mg,edge,:htransition)
-            membership[j]=ceil(Int64,(ltransition+htransition)*5)+1
-            j+=1
+        try
+            celAutom.edgesA[tuple(edge.src,edge.dst)]
+            membership[j]=2
+        catch
         end
-    end
-    for i in range(1,stop=ne(celAutom.mg))
-        if membership[i] in [1 2 3 4 5 6]
-        else
-            println("Probleempje $(membership[i])")
-            membership[i]=7
+        try
+            celAutom.edgesA[tuple(edge.dst,edge.src)]
+            membership[j]=2
+        catch
         end
+        j+=1
     end
     return colors=edgecolor[membership]
 end
@@ -157,7 +151,7 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::I
     if dim == 3
         loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
         nodefillc = coloringGraph(celAutom)
-        edgefillc =coloringEdge(celAutom)
+        #edgefillc =coloringEdge(celAutom)
         g2 = graphplot(celAutom.mg,dim=3, x = loc_x, y=loc_y, z=loc_z,
                         markercolor = nodefillc, linecolor = :black,
                         markersize = 4, linewidth=2, curves=false)
@@ -177,7 +171,8 @@ end
 #TODO add time fraction so that when node goes from state 3 to 1 in that time,
 # it can be activated -> @param
 function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64,timeFraction::Float64)
-    if get_prop(celAutom.mg,node,:state)==1||(get_prop(celAutom.mg,node,:state)==3&&get_prop(celAutom.mg,node,:tcounter)+timeFraction>=(18.5/celAutom.δt))
+    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
+    if get_prop(celAutom.mg,node,:state)==1||(get_prop(celAutom.mg,node,:state)==3&&get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
         return true
     end
     return false
@@ -197,23 +192,10 @@ function makeTransition!(celAutom::CellulaireAutomaat)
         CV = get_prop(celAutom.mg, key[1], :CV)
         ani = get_prop(celAutom.mg, key[1], key[2], :anisotropy)
         dx = get_prop(celAutom.mg, key[1],key[2],:dx)
-        set_prop!(celAutom.mg, key[1],key[2],getTransition(key),celAutom.edgesA[key]+ CV*ani/dx)
         celAutom.edgesA[key]+= CV*ani/dx
     end
 end
-##
-#   getTransition returns the key :ltransition if the first node in the tuple
-#   has a lower number than the second, and :htransition if it is larger.
-#
-#   @param  (Tuple{Int64,Int64}) nodeTuple
-#           A tuple that contains the source node as first element and destination
-#           node as second element
-function getTransition(nodeTuple::Tuple{Int64,Int64})
-    if nodeTuple[1] < nodeTuple[2]
-        return :ltransition
-    end
-    return :htransition
-end
+
 ##
 #   activate sets the node on state 2 and the tcounter on 0, recalculates CV
 #   APD
@@ -243,11 +225,13 @@ end
 #   @param  (Int64) there
 #           The other side of the edge
 function canActivateEdge(celAutom::CellulaireAutomaat, here::Int64, there::Int64)
-    if here < there
-        return (get_prop(celAutom.mg, here, there, :htransition) == 0)
-    elseif there < here
-        return (get_prop(celAutom.mg, here, there, :ltransition) == 0)
+    try
+        celAutom.edgesA[tuple(there, here)]
+        return false
+    catch
+        return true
     end
+
 end
 ##
 #   handleSurplus is where we use the PriorityQueue embedded in the mutable struct
@@ -280,8 +264,11 @@ function handleSurplus(celAutom::CellulaireAutomaat)
             #go to next edges and set transition
             for node in collect(setdiff(neighbors(celAutom.mg,key[2]),key[1]))
                 if canActivateEdge(celAutom,key[2],node)
-                    transtitionsSide = getTransition((key[2],node))
-                    currentTransistion =  get_prop(celAutom.mg, key[2],node,transtitionsSide)
+                    currentTransition=0
+                    try
+                        currentTransition+=celAutom.edgesA[tuple(key[2],node)]
+                    catch
+                    end
                     #get different properties of new edge
                     dx2=get_prop(celAutom.mg, key[2],node,:dx)
                     ani2=get_prop(celAutom.mg,key[2],node,:anisotropy)
@@ -289,10 +276,12 @@ function handleSurplus(celAutom::CellulaireAutomaat)
                     #calculate the new transition
                     newTransition = surplus*dx/dx2*ani2/ani*CV2/CV
                     #set the transition on the max of the current and new transition
-                    set_prop!(celAutom.mg,key[2],node,transtitionsSide,max(newTransition,currentTransistion))
-                    enqueue!(celAutom.edgesA,(key[2], node),max(newTransition,currentTransistion))
+                    try
+                        celAutom.edgesA[tuple(key[2],node)]=max(newTransition,currentTransition)
+                    catch
+                        enqueue!(celAutom.edgesA,(key[2], node),max(newTransition,currentTransition))
+                    end
                 else
-                    set_prop!(celAutom.mg,key[2],node,:ltransition,-1)
                     try
                         delete!(celAutom.edgesA,(node,key[2]))
                     catch
@@ -300,8 +289,6 @@ function handleSurplus(celAutom::CellulaireAutomaat)
                 end
             end
         end
-        set_prop!(celAutom.mg,key[1],key[2],:ltransition,0)
-        set_prop!(celAutom.mg,key[1],key[2],:htransition,0)
     end
 end
 ##
@@ -356,8 +343,8 @@ end
 #           then we set the state to 1
 function state3to1!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,3))
-        #18.5 ms / δt time units
-        if get_prop(celAutom.mg,node,:tcounter)>=(18.5/celAutom.δt)
+        timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
+        if get_prop(celAutom.mg,node,:tcounter)>=timeState3
             set_prop!(celAutom.mg,node,:state,1)
         end
     end
@@ -441,10 +428,7 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
         set_prop!(graph,node,:tcounter,1000)
         set_prop!(graph,node,:APD,242/celAutom.δt)
     end
-    for edge in collect(edges(graph))
-        set_prop!(graph,edge,:ltransition,0)
-        set_prop!(graph,edge,:htransition,0)
-    end
+
     for node in startwaarden
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,0)
@@ -490,11 +474,7 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
-        for edge in collect(filter_edges(celAutom.mg,:ltransition,-1))
-            set_prop!(celAutom.mg,edge,:ltransition,0)
-            set_prop!(celAutom.mg,edge,:htransition,0)
-        end
-                                    #TODO title plot with celAutom.time
+        #TODO title plot with celAutom.time
         celAutom.time+=celAutom.δt
     end
 end
@@ -560,7 +540,7 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("data_verticeshart.dat", "data_edgeshart.dat", ',')
+    graph = constructGraph("data_verticesschijf.dat", "data_edgesschijf.dat", ',')
     startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
     stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
@@ -580,10 +560,9 @@ function main()
     celAutom = createCellulaireAutomaat(graph,dt, startwaarden,stopwaarden,
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
-
-    folder="plotjes_test2"
-    dim = 3
-    createFrames(folder,20,20,celAutom, dim)
+    folder="plotjes_test3"
+    dim = 2
+    createFrames(folder,200,200,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
