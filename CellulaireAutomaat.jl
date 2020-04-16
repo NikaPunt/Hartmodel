@@ -272,8 +272,8 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         dx=get_prop(celAutom.mg, key[1],key[2],:dx)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
         CV=get_prop(celAutom.mg,key[1],:CV)
-        #time Fraction to get to the node
-        timeFraction=1-surplus/CV
+        #fraction of the time step to get to the node
+        timeFraction=1-surplus/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
             #activate node
             activate!(celAutom, key[2],timeFraction)
@@ -560,7 +560,7 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("data_verticesschijf.dat", "data_edgesschijf.dat", ',')
+    graph = constructGraph("data_verticeshart.dat", "data_edgeshart.dat", ',')
     startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
     stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
@@ -583,7 +583,7 @@ function main()
 
     folder="plotjes_test2"
     dim = 3
-    createFrames(folder,200,200,celAutom, dim)
+    createFrames(folder,20,20,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
