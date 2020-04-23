@@ -64,6 +64,10 @@ function constructGraph(filename_vertices::String,filename_edges::String,delimit
             set_prop!(mg,Int(input_edges[i,1]),Int(input_edges[i,2]),Symbol(input_edges[1,j]),input_edges[i,j])
         end
     end
+    #purkinje
+    #add_edge!(mg,1297,13124)
+    #set_prop!(mg,1297,13124,:anisotropy,1)
+    #set_prop!(mg,1297,13124,:dx,0.01)
     println("Graph check!")
     return mg
 end
@@ -419,13 +423,13 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
             end
         end
     end
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=2, ARI_ss_endo=ARI_ss_endo,
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
                                 b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
-        set_prop!(graph,node,:tcounter,1000)
+        set_prop!(graph,node,:tcounter,1)
         set_prop!(graph,node,:APD,242/celAutom.δt)
     end
 
@@ -540,9 +544,9 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("data_verticesschijf.dat", "data_edgesschijf.dat", ',')
-    startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
-    stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
+    graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
+    startwaarden=get_area(graph, -100.0,20.0, 110.0,125.0,-100.0,100.0)
+    stopwaarden = get_area(graph, -100.0,20.0,125.0,140.0,-100.0,100.0)
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
@@ -555,12 +559,12 @@ function main()
     b_endo = Float64(501)
 
     #time step
-    dt=Int64(10)
+    dt=Int64(5)
 
     celAutom = createCellulaireAutomaat(graph,dt, startwaarden,stopwaarden,
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
-    folder="plotjes_test3"
+    folder="plotjes_test4"
     dim = 2
     createFrames(folder,200,200,celAutom, dim)
     elapsed = time() - start
