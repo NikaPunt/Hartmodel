@@ -3,6 +3,8 @@ using LightGraphs
 using MetaGraphs
 using DelimitedFiles
 using DataStructures
+#using SmoothLivePlot
+# https://github.com/williamjsdavis/SmoothLivePlot.jl
 include("plot_graph.jl")
 
 mutable struct CellulaireAutomaat
@@ -11,6 +13,9 @@ mutable struct CellulaireAutomaat
         #1: non-active and can be depolarised -> DI (black)
         #2: active and fires in begin period -> APD (red)
         #3: non-active and can't be depolarised -> DI (green)
+    heart::Array{Any,2} # cf CODE_README
+    elec::Dict{String,Any} # contains the column indices of the projection vector per electrode
+
     time::Int64#Time since running time in t.u.
     δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
 
@@ -28,6 +33,8 @@ mutable struct CellulaireAutomaat
     #transitions of the active edges
     edgesA::PriorityQueue{Tuple{Int64,Int64}, Float64}
 end
+
+include("functions_ECG.jl")
 
 ##
 #   constructGraph will construct a metagraph with several given properties
@@ -415,10 +422,19 @@ end
 #           (ltransition - higher transition) This is the fraction of the
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
-function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Array{Any,1},
+function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::String,
+                                    filename_elec::String,dlm::Char,dt::Int64, startwaarden::Array{Any,1},
                                     stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64)
+    # construct heart
+    (input_heart, header_heart) = readdlm(filename_tetrahedrons,dlm,header=true)
+
+    # construct dict_elec
+    input_elec = readdlm(filename_elec,dlm,String)
+    dict_elec = Dict( input_elec[i] => parse(Int64,input_elec[i,2]):parse(Int64,input_elec[i,3]) for i=1:size(input_elec,1) )
+
+
     Priority = PriorityQueue{Tuple{Int64,Int64}, Float64}(Base.Order.Reverse)
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
@@ -428,7 +444,7 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
             end
         end
     end
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
+    celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,elec=dict_elec,time=1,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
                                 b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
     for node in collect(vertices(graph))
@@ -473,12 +489,27 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         mkdir(folderName)
     catch
     end
-    plotGraph2(celAutom,0,folderName, dim)
+    ECGstruct = initializeECG("beam",amountCalcs)
+    wavefront = zeros(amountCalcs)
+    x_ax = zeros(amountCalcs)
+    # SmoothLivePlot is a quite new package, it seams like it makes plot not accepting any keyword arguments anymore
+    # for using SmoothLivePlot, use macro @makeLivePlot and modifyPlotObject!
+    #ecg_plot = plot(x_ax,ECG_beam,title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-3,3),label=["1" "2"])
+    #wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,2000),ylims=(0,50))
+    #ecg_plot = plot(3,title="3-lead ECG",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-0.1,0.1),label=["E1" "E2" "E3"])
+    #plotGraph2(celAutom,0,folderName, dim)
+    plotGraph2(celAutom,0,"$folderName/frames_balk", dim)
     printIndex=floor(amountCalcs/amountFrames)
     for i in range(1,stop=amountCalcs)
         updateState!(celAutom)
         if mod(i,printIndex)==0
-            plotGraph2(celAutom,Int64(i/printIndex),folderName, dim)
+            plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_balk", dim)
+            wavefront[i] = updateECG!(ECGstruct,celAutom)
+            #(ECG3[i,:],wavefront[i]) = ecg3(celAutom)
+            x_ax[i]=celAutom.time*celAutom.δt
+
+            #modifyPlotObject!(wave_plot,arg1=x_ax[1:i],arg2=wavefront[1:i])
+            #modifyPlotObject!(ecg_plot,arg1=x_ax[1:i],arg2=ECG_beam[:,1:i])
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
@@ -486,6 +517,10 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
     end
+    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_calcs["1"],ECGstruct.ECG_calcs["2"]),title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,1600),ylims=(-3,3),label=["1" "2" "verschil"])
+    wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1600),ylims=(0,150))
+    png(ecg_plot,"$folderName/ECG3_beam_plane.png")
+    png(wave_plot,"$folderName/Wavefront_plane")
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken
@@ -550,9 +585,6 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
-    startwaarden=get_area(graph, -100.0,50.0, 110.0,125.0,-100.0,100.0)
-    stopwaarden = get_area(graph, -100.0,50.0,125.0,140.0,-100.0,100.0)
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
@@ -567,12 +599,37 @@ function main()
     #time step
     dt=Int64(5)
 
-    celAutom = createCellulaireAutomaat(graph,dt, startwaarden,stopwaarden,
-                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+    ## balk
+    graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
+    # vlakke golf balk
+    startwaarden = get_area(graph,-10.0,-10.0,-10.0,10.0,0.0,1.0)
+    stopwaarden = []
+    # spiraalgolf balk
+    #startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
+    #stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
-    folder="plotjes_test4"
+    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_beam_elec.dat","column_indices_beam_elec.dat",
+                            ',',dt, startwaarden,stopwaarden,
+                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+
+
+    ### hart
+    #graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
+    ## vlakke golf hart
+    #startwaarden = get_area(graph,200.0,300.0,0.0,300.0,0.0,100.0)
+    #stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
+    ## spiraalgolf hart
+    #startwaarden=get_area(graph, -100.0,50.0, 110.0,125.0,-100.0,100.0)
+    #stopwaarden = get_area(graph, -100.0,50.0,125.0,140.0,-100.0,100.0)
+
+    #celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
+    #                        ',',dt, startwaarden,stopwaarden,
+    #                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+
+
+    folder="groepje3"
     dim = 2
-    createFrames(folder,200,200,celAutom, dim)
+    createFrames(folder,26,26,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
