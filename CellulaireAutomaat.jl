@@ -11,8 +11,9 @@ mutable struct CellulaireAutomaat
         #1: non-active and can be depolarised -> DI (black)
         #2: active and fires in begin period -> APD (red)
         #3: non-active and can't be depolarised -> DI (green)
-    time::Int64
+    time::Int64#Time since running time in t.u.
     δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
+
     δx::Float64 #the space unit in cm -> 1 s.u. = δx cm
 
     ARI_ss_epi::Float64
@@ -175,11 +176,15 @@ end
 #TODO add time fraction so that when node goes from state 3 to 1 in that time,
 # it can be activated -> @param
 function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64,timeFraction::Float64)
-    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
-    if get_prop(celAutom.mg,node,:state)==1||(get_prop(celAutom.mg,node,:state)==3&&get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
+    if get_prop(celAutom.mg,node,:state)==1
         return true
     end
-    return false
+    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
+    if get_prop(celAutom.mg,node,:state)==3
+        return (get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
+    end
+    timeState2and3= timeState3+get_prop(celAutom.mg,node,:APD)
+    return (get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState2and3)
 end
 ##
 #   makeTransition will add the CV*anistropy/dx to every edge with a running
@@ -261,7 +266,7 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
         CV=get_prop(celAutom.mg,key[1],:CV)
         #fraction of the time step to get to the node
-        timeFraction=1-surplus/(CV*ani)
+        timeFraction=1-(surplus*dx)/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
             #activate node
             activate!(celAutom, key[2],timeFraction)
@@ -330,7 +335,7 @@ function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
         if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,3)
-            set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD))
+            set_prop!(celAutom.mg,node,:tcounter,-get_prop(celAutom.mg,node,:APD))
         end
     end
 end
@@ -479,7 +484,7 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
         #TODO title plot with celAutom.time
-        celAutom.time+=celAutom.δt
+        celAutom.time+=1#1 time step further
     end
 end
 ##
@@ -495,15 +500,16 @@ end
 #   @post   The given node will have its APD property changed to the new value
 #           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
-    DI= get_prop(celAutom.mg, node, :tcounter)
+    #CL = DI + APD (previous cycle)
+    CL = get_prop(celAutom.mg, node, :tcounter) + get_prop(celAutom.mg, node, :APD)
     T = 1#get_prop(celAutom.mg, node, :T)
 
     #epi APD
-    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-DI*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
+    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-CL*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
     ARI_epi=ARI_epi/celAutom.δt#ms -> t.u
 
     #endo APD
-    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-DI*celAutom.δt/celAutom.b_endo)#Implementation formula in ms
+    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-CL*celAutom.δt/celAutom.b_endo)#Implementation formula in ms
     ARI_endo=ARI_endo/celAutom.δt#ms -> t.u
 
     #Real APD
@@ -545,8 +551,8 @@ end
 function main()
     start = time()
     graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
-    startwaarden=get_area(graph, -100.0,20.0, 110.0,125.0,-100.0,100.0)
-    stopwaarden = get_area(graph, -100.0,20.0,125.0,140.0,-100.0,100.0)
+    startwaarden=get_area(graph, -100.0,50.0, 110.0,125.0,-100.0,100.0)
+    stopwaarden = get_area(graph, -100.0,50.0,125.0,140.0,-100.0,100.0)
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
