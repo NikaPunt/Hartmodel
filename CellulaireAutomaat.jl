@@ -434,7 +434,6 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     input_elec = readdlm(filename_elec,dlm,String)
     dict_elec = Dict( input_elec[i] => parse(Int64,input_elec[i,2]):parse(Int64,input_elec[i,3]) for i=1:size(input_elec,1) )
 
-
     Priority = PriorityQueue{Tuple{Int64,Int64}, Float64}(Base.Order.Reverse)
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
@@ -497,13 +496,13 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
     #ecg_plot = plot(x_ax,ECG_beam,title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-3,3),label=["1" "2"])
     #wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,2000),ylims=(0,50))
     #ecg_plot = plot(3,title="3-lead ECG",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-0.1,0.1),label=["E1" "E2" "E3"])
-    #plotGraph2(celAutom,0,folderName, dim)
-    plotGraph2(celAutom,0,"$folderName/frames_balk", dim)
+
+    #plotGraph2(celAutom,0,"$folderName/frames_balk", dim)
     printIndex=floor(amountCalcs/amountFrames)
     for i in range(1,stop=amountCalcs)
         updateState!(celAutom)
         if mod(i,printIndex)==0
-            plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_balk", dim)
+            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_balk", dim)
             wavefront[i] = updateECG!(ECGstruct,celAutom)
             #(ECG3[i,:],wavefront[i]) = ecg3(celAutom)
             x_ax[i]=celAutom.time*celAutom.δt
@@ -517,10 +516,11 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
     end
-    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_calcs["1"],ECGstruct.ECG_calcs["2"]),title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,1600),ylims=(-3,3),label=["1" "2" "verschil"])
-    wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1600),ylims=(0,150))
+    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_calcs["1"],ECGstruct.ECG_calcs["2"]),title="EG beam",xlabel="Time",ylabel="Potentiaal",xlims=(0,200),ylims=(-3,3),label=["1" "2" "verschil"])
+    wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,200),ylims=(0,150))
     png(ecg_plot,"$folderName/ECG3_beam_plane.png")
     png(wave_plot,"$folderName/Wavefront_plane")
+    display(ECGstruct.ECG_calcs)
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken

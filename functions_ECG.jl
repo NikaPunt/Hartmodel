@@ -350,13 +350,14 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
 
       p_0= 1 # wild guess
       # calculate p, which contains the normal distribution spread of the repolarisation wave
-      n_spread = 3 # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
-      σ = (n_spread*celAutom.δt)/2 # see 'normalDistributionTWave.pdf' on github
-      d = Normal(0.0,σ)
+      n_spread = 2 # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
+      #σ = (n_spread*celAutom.δt)/2 # see 'normalDistributionTWave.pdf' on github
+      d = Normal()
       p = repeat([Float64(p_0)],2*n_spread+1)
       for i = 1:2*n_spread+1
             p[i] *= pdf(d,(i-n_spread-1)*celAutom.δt)
       end
+
 
       indices_elec = celAutom.elec # dictionary containing per electrode (key) the indices of the columns that contain the connecting projection vector for the particular electrode
       heart = celAutom.heart
@@ -378,14 +379,15 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
                   APD /= length(v_fire)
                   APD = Int(floor(APD)) # convert APD into time units -> not necessary
 
-                  for j in range(1,stop=n_elec) # for each given electrode
+                  for electrode in name_elec # for each given electrode
                         # dot product of surface normal vector and connecting projection vector for the particular electrode, stored in the tetraeder array
                         # hier zou Threads evt een probleem kunnen vormen
-                        uitkomst = dot(NS,tetraeder[indices_elec[name_elec[j]]])
-                        ECGstruct.ECG_calcs[name_elec[j]][celAutom.time] += p_0*uitkomst
+                        uitkomst = dot(NS,tetraeder[indices_elec[electrode]])
+                        ECGstruct.ECG_calcs[electrode][celAutom.time] += p_0*uitkomst
+
                         for i = 1:2*n_spread+1
-                              if celAutom.time+APD+i-n_spread-1 <= ECGstruct.n_calcs
-                                    ECGstruct.ECG_calcs[name_elec[j]][celAutom.time+APD+i-n_spread-1] -= p[i]*uitkomst
+                              if celAutom.time+APD+i-n_spread-1 <= ECGstruct.n_calcs # in order not to exceed boundary
+                                    ECGstruct.ECG_calcs[electrode][celAutom.time+APD+i-n_spread-1] -= p[i]*uitkomst
                                     # celAutom.time+APD+i-n_spread-1: go APD indices further than celAutom.time, then i-n_spread-1 is the deviation of the center celAutom.time+APD
                                     # see 'normalDistributionTWave.pdf' on github
                               end
@@ -505,7 +507,7 @@ function initializeECG(t::String,amountCalcs::Int64)
       ECG_calcs_init = Dict{String,Array{Float64,1}}()
 
       if t == "beam"
-            name_elecs = ["1" "2"]
+            name_elecs = ["1","2"]
       elseif t == "heart3"
             name_elecs = ["VR","VL","VF"]
       elseif t == "heart12"
