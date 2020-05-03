@@ -488,21 +488,21 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         mkdir(folderName)
     catch
     end
-    ECGstruct = initializeECG("beam",amountCalcs)
+    ECGstruct = initializeECG("heart3",amountCalcs)
     wavefront = zeros(amountCalcs)
     x_ax = zeros(amountCalcs)
     # SmoothLivePlot is a quite new package, it seams like it makes plot not accepting any keyword arguments anymore
     # for using SmoothLivePlot, use macro @makeLivePlot and modifyPlotObject!
     #ecg_plot = plot(x_ax,ECG_beam,title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-3,3),label=["1" "2"])
     #wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,2000),ylims=(0,50))
-    #ecg_plot = plot(3,title="3-lead ECG",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-0.1,0.1),label=["E1" "E2" "E3"])
+    #ecg_plot = plot(x_ax,title="3-lead ECG",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-0.1,0.1),label=["E1" "E2" "E3"])
 
-    #plotGraph2(celAutom,0,"$folderName/frames_balk", dim)
+    plotGraph2(celAutom,0,"$folderName/frames_heart", dim)
     printIndex=floor(amountCalcs/amountFrames)
     for i in range(1,stop=amountCalcs)
         updateState!(celAutom)
         if mod(i,printIndex)==0
-            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_balk", dim)
+            plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heart", dim)
             wavefront[i] = updateECG!(ECGstruct,celAutom)
             #(ECG3[i,:],wavefront[i]) = ecg3(celAutom)
             x_ax[i]=celAutom.time*celAutom.δt
@@ -516,11 +516,10 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
     end
-    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_calcs["1"],ECGstruct.ECG_calcs["2"]),title="EG beam",xlabel="Time",ylabel="Potentiaal",xlims=(0,200),ylims=(-3,3),label=["1" "2" "verschil"])
-    wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,200),ylims=(0,150))
-    png(ecg_plot,"$folderName/ECG3_beam_plane.png")
-    png(wave_plot,"$folderName/Wavefront_plane")
-    display(ECGstruct.ECG_calcs)
+    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_calcs["E1"],ECGstruct.ECG_calcs["E2"],ECGstruct.ECG_calcs["E3"]),title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",xlims=(0,1000),ylims=(-5,5),label=["1" "2" "verschil"])
+    wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1000),ylims=(0,150))
+    png(ecg_plot,"$folderName/ECG3_heart_spiral.png")
+    png(wave_plot,"$folderName/Wavefront_heart")
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken
@@ -600,36 +599,36 @@ function main()
     dt=Int64(5)
 
     ## balk
-    graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
+    #graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
     # vlakke golf balk
-    startwaarden = get_area(graph,-10.0,-10.0,-10.0,10.0,0.0,1.0)
-    stopwaarden = []
+    #startwaarden = get_area(graph,-10.0,-10.0,-10.0,10.0,0.0,1.0)
+    #stopwaarden = []
     # spiraalgolf balk
     #startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
     #stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
-    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_beam_elec.dat","column_indices_beam_elec.dat",
+    #celAutom = createCellulaireAutomaat(graph,"data_tetraeder_beam_elec.dat","column_indices_beam_elec.dat",
                             ',',dt, startwaarden,stopwaarden,
                             ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
 
     ### hart
-    #graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
+    graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
     ## vlakke golf hart
-    #startwaarden = get_area(graph,200.0,300.0,0.0,300.0,0.0,100.0)
-    #stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
+    startwaarden = [1297,13124]
+    stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
     ## spiraalgolf hart
     #startwaarden=get_area(graph, -100.0,50.0, 110.0,125.0,-100.0,100.0)
     #stopwaarden = get_area(graph, -100.0,50.0,125.0,140.0,-100.0,100.0)
 
-    #celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
-    #                        ',',dt, startwaarden,stopwaarden,
-    #                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
+                            ',',dt, startwaarden,stopwaarden,
+                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
 
     folder="groepje3"
     dim = 2
-    createFrames(folder,26,26,celAutom, dim)
+    createFrames(folder,200,200,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
