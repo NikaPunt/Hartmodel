@@ -450,8 +450,8 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
-        set_prop!(graph,node,:tcounter,1)
-        set_prop!(graph,node,:APD,242/celAutom.δt)
+        set_prop!(graph,node,:tcounter,100)
+        set_prop!(graph,node,:APD,min(ARI_ss_epi,ARI_ss_endo))
     end
 
     for node in startwaarden
@@ -483,30 +483,33 @@ end
 #   @post   #amount frames will be made. Each time by calling an updateState to
 #           go to the next state and then calling plotGraph2 to plot the graph.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
-                        celAutom::CellulaireAutomaat, dim::Int64)
+                        amountECG::Int64,celAutom::CellulaireAutomaat, dim::Int64)
     #this calculates timesteps until we have the amount of necessary frames
     try
         mkdir(folderName)
     catch
     end
     ECGstruct = initializeECG("heart3",amountCalcs)
-    wavefront = zeros(amountCalcs)
     x_ax = collect(1:amountCalcs)*celAutom.δt
     # SmoothLivePlot is a quite new package, it seams like it makes plot not accepting any keyword arguments anymore
     # for using SmoothLivePlot, use macro @makeLivePlot and modifyPlotObject!
     #ecg_plot = plot(x_ax,ECG_beam,title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-3,3),label=["1" "2"])
     #wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,2000),ylims=(0,50))
-    #ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_leads["E1"],ECGstruct.ECG_leads["E2"],ECGstruct.ECG_leads["E3"]),title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",xlims=(0,1000),ylims=(-0.02,0.03),label=["E1" "E2" "E3"])
 
-    #plotGraph2(celAutom,0,"$folderName/frames_heart", dim)
+    #plotGraph2(celAutom,0,"$folderName/frames_heartxz", dim)
     printIndex=floor(amountCalcs/amountFrames)
+    printIndexECG=Int(floor(amountCalcs/amountECG))
     for i in range(1,stop=amountCalcs)
         updateState!(ECGstruct,celAutom)
         if mod(i,printIndex)==0
-            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heart", dim)
-
-            #modifyPlotObject!(wave_plot,arg1=x_ax[1:i],arg2=wavefront[1:i])
-            #modifyPlotObject!(ecg_plot,arg1=x_ax,arg2=hcat(ECGstruct.ECG_leads["E1"],ECGstruct.ECG_leads["E2"],ECGstruct.ECG_leads["E3"]))
+            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heartxz", dim)
+        end
+        if mod(i,printIndexECG)==0
+            #ECGleads = hcat(ECGstruct.ECG_leads["I"],ECGstruct.ECG_leads["II"],ECGstruct.ECG_leads["III"])
+            #ecg_plot = plot(x_ax[1:i],ECGleads[1:i,:],
+            #                title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
+            #                xlims=(0,1000),ylims=(-0.2,0.3),label=["I" "II" "III"])
+            #display(ecg_plot)
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
@@ -514,12 +517,12 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
     end
-    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_leads["E1"],ECGstruct.ECG_leads["E2"],ECGstruct.ECG_leads["E3"]),
+    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_leads["I"],ECGstruct.ECG_leads["II"],ECGstruct.ECG_leads["III"]),
                     title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-                    xlims=(0,1000),ylims=(-0.2,0.3),label=["E1" "E2" "E3"])#,layout=(3,1))
-    wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1000),ylims=(0,40000))
-    png(ecg_plot,"$folderName/ECG3_heart_sigma.png")
-    png(wave_plot,"$folderName/Wavefront_heart")
+                    xlims=(0,1000),ylims=(-0.2,0.3),label=["I" "II" "III"])#,layout=(3,1))
+    #wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1500),ylims=(0,40000))
+    #png(ecg_plot,"$folderName/ECG3_heart.png")
+    #png(wave_plot,"$folderName/Wavefront_heart")
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken
@@ -562,7 +565,7 @@ end
 #           of: CV = 70.03-52.12*e^(-DI/87.6)
 function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
     DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt/1000#DI in sec
-    CV=70.03-52.12*exp(-DI/87.6)#cm/sec
+    CV=70.03-52.12*exp(-DI/87.6)#cm/sec STEADY STATE
     CV=CV*celAutom.δt/1000#transition to cm/t.u.
     CV=CV/celAutom.δx#transition to s.u./t.u.
     set_prop!(celAutom.mg, node,:CV, CV)
@@ -628,7 +631,7 @@ function main()
 
     folder="groepje3"
     dim = 2
-    createFrames(folder,200,200,celAutom, dim)
+    createFrames(folder,200,200,50,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end

@@ -11,8 +11,8 @@ using Distributions
 
 mutable struct ECG
       type::String # "beam","heart3","heart12"
-      ECG_calcs::Dict{String,Array{Float64,1}}
-      ECG_leads::Dict{String,Array{Float64,1}}
+      elec::Dict{String,Array{Float64,1}}
+      lead::Dict{String,Array{Float64,1}}
       wavefront::Array{Float64,1}
       n_calcs::Int64
 end
@@ -326,39 +326,53 @@ end
 
 
 """
-    get_potential!(celAutom::CellulaireAutomaat,name_elec::Array{String,1})
+    get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
 Iterates over all tetrahedrons in the heart and computes potential in the electrodes
-in name_elec.
+contained in ECGstruct.
 
+@param      (ECG) `ECGstruct`\n
+            An object of the class ECG that contains the number of electrodes, as wel
+            as a dictionary with the electrodes as keys and the potential at the
+            electrode for each time step in an array as values. It carries also
+            an array with the area of the wavefront at each timestep.
 @param      (CellulaireAutomaat) `celAutom` \n
             An object of the class CellulaireAutomaat that carries an object of
             type MetaGraph representing the heart, as wel as the info on the tetrahedrons,
             the active edges along with the transition fractions on the edges and
             a dictionary with the column indices of the connecting projection vector (values)
             per electrode (keys) \n
-@param      (Array{String,1}) `name_elec` \n
-            Contains all names of the electrodes in which the potential must be
-            computed. The order of the electrodes in `name_elec` will be the order
-            of the potentials in the outut.\n
 
-@return     (Array{Float64,1})\n
-            The potentials in the electrodes, in the order of `name_elec`.
+@post       ECGstruct.wavefront is updated with the area of the wavefront at the
+            present timestep.
+@post       The values of all keys (electrodes) of ECGstruct.elec is updated with
+            the potential at the given electrode at te present timestep.
+@post       An expected potential in the future is added to represent the repolarisation
+            potential. The potential at the present timestep in an electrode is
+            spread out in a normal distribution way, with as mean celAutom.time+APD
+            APD is the mean of the Action Potential Duration of the vertices
+            that have fired in a given tetrahedron. The standard deviation is
+            calculated such that approximately 98% of the area under the normal
+            distribution curve is within n_spread from the mean.
+            One can retrieve the electrode potential at the present time celAutom.time
+            for a given electrode by calling ECGstruct.elec[electrode][celAutom.time].
+
 """
 function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
-      name_elec = collect(keys(ECGstruct.ECG_calcs))
+      name_elec = collect(keys(ECGstruct.elec))
       n_elec = size(name_elec,1)
       #uitkomst = zeros(n_elec)
       wavefront = 0
 
       p_0= 1 # wild guess
       # calculate p, which contains the normal distribution spread of the repolarisation wave
-      n_spread = 2 # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
-      #σ = n_spread/2 # see 'normalDistributionTWave.pdf' on github
-      d = Normal()
+      n_spread = 3 # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
+      σ = n_spread/2 # see 'normalDistributionTWave.pdf' on github
+      d = Normal(0,σ)
       p = repeat([Float64(p_0)],2*n_spread+1)
       for i = 1:2*n_spread+1
-            p[i] *= pdf(d,(i-n_spread-1)*celAutom.δt)
+            p[i] *= pdf(d,i-n_spread-1)
       end
+      display(p)
 
 
       indices_elec = celAutom.elec # dictionary containing per electrode (key) the indices of the columns that contain the connecting projection vector for the particular electrode
@@ -385,12 +399,12 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
                         # dot product of surface normal vector and connecting projection vector for the particular electrode, stored in the tetraeder array
                         # hier zou Threads evt een probleem kunnen vormen
                         uitkomst = dot(NS,tetraeder[indices_elec[electrode]])
-                        ECGstruct.ECG_calcs[electrode][celAutom.time] += p_0*uitkomst
+                        ECGstruct.elec[electrode][celAutom.time] += p_0*uitkomst
 
                         # T-wave
                         for i = 1:2*n_spread+1
                               if celAutom.time+APD+i-n_spread-1 <= ECGstruct.n_calcs # in order not to exceed boundary
-                                    ECGstruct.ECG_calcs[electrode][celAutom.time+APD+i-n_spread-1] -= p[i]*uitkomst
+                                    ECGstruct.elec[electrode][celAutom.time+APD+i-n_spread-1] -= p[i]*uitkomst
                                     # celAutom.time+APD+i-n_spread-1: go APD indices further than celAutom.time, then i-n_spread-1 is the deviation of the center celAutom.time+APD
                                     # see 'normalDistributionTWave.pdf' on github
                               end
@@ -404,9 +418,14 @@ end
 
 
 """
-      ecg3(celAutom::CellulaireAutomaat)
-The function returns the 3 voltages for the ecg
+      ecg3!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
+calculates the 3-lead potentials and stores them in ECGstruct.lead
 
+@param      (ECG) `ECGstruct`\n
+            An object of the class ECG that contains the number of electrodes, as wel
+            as a dictionary with the electrodes as keys and the potential at the
+            electrode for each time step in an array as values. It carries also
+            an array with the area of the wavefront at each timestep.
 @param      (CellulaireAutomaat) `celAutom` \n
             An object of the class CellulaireAutomaat that carries an object of
             type MetaGraph representing the heart, as wel as the info on the tetrahedrons,
@@ -414,16 +433,25 @@ The function returns the 3 voltages for the ecg
             a dictionary with the column indices of the connecting projection vector (values)
             per electrode (keys) \n
 
-@return     (Array{Float64,1})\n
-            The voltages in the order E1, E2, E3.
+@post       ECGstruct.wavefront is updated with the area of the wavefront at the
+            present timestep.
+@post       The values of all keys (electrodes) of ECGstruct.elec is updated with
+            the potential at the given electrode at te present timestep.
+@post       An expected potential in the future is added to represent the repolarisation
+            potential. See `get_potential!` for more info on the way this is calculated.
+            One can retrieve the electrode potential at the present time celAutom.time
+            for a given electrode by calling ECGstruct.elec[electrode][celAutom.time].
+@post       ECGstruct.lead contains for every lead in the 3-lead system the corresponding
+            potential at the present time step. One can retrieve the lead potential
+            at the present time celAutom.time for a given lead by calling ECGstruct.lead[lead][celAutom.time].
 
 """
 function ecg3!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
-      get_potential!(ECGstruct,celAutom) # array with potentials in each electrode
+      get_potential!(ECGstruct,celAutom)
       # compute lead potentials with given formulas
-      ECGstruct.ECG_leads["E1"]=ECGstruct.ECG_calcs["VL"]-ECGstruct.ECG_calcs["VR"]
-      ECGstruct.ECG_leads["E2"]=ECGstruct.ECG_calcs["VF"]-ECGstruct.ECG_calcs["VR"]
-      ECGstruct.ECG_leads["E3"]=ECGstruct.ECG_calcs["VF"]-ECGstruct.ECG_calcs["VL"]
+      ECGstruct.lead["I"]=ECGstruct.elec["VL"]-ECGstruct.elec["VR"]
+      ECGstruct.lead["II"]=ECGstruct.elec["VF"]-ECGstruct.elec["VR"]
+      ECGstruct.lead["III"]=ECGstruct.elec["VF"]-ECGstruct.elec["VL"]
 end
 
 
@@ -431,6 +459,11 @@ end
       ecg_beam!(celAutom::CellulaireAutomaat)
 This function is especially written to calculate the EG for a beam.
 
+@param      (ECG) `ECGstruct`\n
+            An object of the class ECG that contains the number of electrodes, as wel
+            as a dictionary with the electrodes as keys and the potential at the
+            electrode for each time step in an array as values. It carries also
+            an array with the area of the wavefront at each timestep.
 @param      (CellulaireAutomaat) `celAutom` \n
             An object of the class CellulaireAutomaat that carries an object of
             type MetaGraph representing the beam, as wel as the info on the tetrahedrons,
@@ -438,20 +471,34 @@ This function is especially written to calculate the EG for a beam.
             a dictionary with the column indices of the connecting projection vector (values)
             per electrode (keys) \n
 
-@return     (Array{Float64,1})
-            The potentials in the electrodes '1' and '2'
+@post       ECGstruct.wavefront is updated with the area of the wavefront at the
+            present timestep.
+@post       The values of all keys (electrodes) of ECGstruct.elec is updated with
+            the potential at the given electrode at te present timestep.
+@post       An expected potential in the future is added to represent the repolarisation
+            potential. See `get_potential!` for more info on the way this is calculated.
+            One can retrieve the electrode potential at the present time celAutom.time
+            for a given electrode by calling ECGstruct.elec[electrode][celAutom.time].
+@post       ECGstruct.lead contains the lead "verschil" which is defined as
+            the difference between the potentials in electrode 1 and 2 as well as
+            the corresponding potential at the present time step. One can retrieve
+            the lead potential at the present time celAutom.time for a given lead by calling ECGstruct.lead[lead][celAutom.time].
 """
 function ecg_beam!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
       get_potential!(ECGstruct,celAutom) # array with potentials in each electrode
-      ECGstruct.ECG_leads["verschil"] = ECGstruct.ECG_calcs["2"] - ECGstruct.ECG_calcs["1"]
+      ECGstruct.lead["verschil"] = ECGstruct.elec["2"] - ECGstruct.elec["1"]
 end
 
 
 """
       function ecg12(heart,mg)
-The function returns the 12 voltages that make up a 12-lead ECG, in the order
-[E1 E2 E3 aVL aVR aVF V1 V2 V3 V4 V5 V6]
+calculates the 12-lead potentials and stores them in ECGstruct.lead
 
+@param      (ECG) `ECGstruct`\n
+            An object of the class ECG that contains the number of electrodes, as wel
+            as a dictionary with the electrodes as keys and the potential at the
+            electrode for each time step in an array as values. It carries also
+            an array with the area of the wavefront at each timestep.
 @param      (CellulaireAutomaat) `celAutom` \n
             An object of the class CellulaireAutomaat that carries an object of
             type MetaGraph representing the beam, as wel as the info on the tetrahedrons,
@@ -459,28 +506,34 @@ The function returns the 12 voltages that make up a 12-lead ECG, in the order
             a dictionary with the column indices of the connecting projection vector (values)
             per electrode (keys) \n
 
-@return     (Array{Float64,1})
-            Contains the potential in the leads that make up a 12-lead ECG, in the
-            order [E1 E2 E3 aVL aVR aVF V1 V2 V3 V4 V5 V6]
+@post       ECGstruct.wavefront is updated with the area of the wavefront at the
+            present timestep.
+@post       The values of all keys (electrodes) of ECGstruct.elec is updated with
+            the potential at the given electrode at te present timestep.
+@post       An expected potential in the future is added to represent the repolarisation
+            potential. See `get_potential!` for more info on the way this is calculated.
+            One can retrieve the electrode potential at the present time celAutom.time
+            for a given electrode by calling ECGstruct.elec[electrode][celAutom.time].
+@post       ECGstruct.lead contains for every lead in the 3-lead system the corresponding
+            potential at the present time step. One can retrieve the lead potential
+            at the present time celAutom.time for a given lead by calling ECGstruct.lead[lead][celAutom.time].
 
 """
-function ecg12(celAutom::CellulaireAutomaat)
-      electrodes = Array{String,1}
-      electrodes = ["VR","VL","VF","V1","V2","V3","V4","V5","V6"]
-      pot_elec = get_potential(celAutom,electrodes) # array with potentials in each electrode
-      # compute lead potentials
-      WCT = sum(pot_elec[1:3])
-      ECG = zeros(12)
-      ECG[1]= pot_elec[2]-pot_elec[1] # E1
-      ECG[2]= pot_elec[3]-pot_elec[1] # E2
-      ECG[3]= pot_elec[3]-pot_elec[2] # E3
-      ECG[4]= pot_elec[2]-0.5*pot_elec[1]-0.5*pot_elec[3] # aVL
-      ECG[5]= pot_elec[1]-0.5*pot_elec[2]-0.5*pot_elec[3] # aVR
-      ECG[6]= pot_elec[3]-0.5*pot_elec[1]-0.5*pot_elec[2] # aVF
-      for i = 7:12 # V1 V2 V3 V4 V5 V6
-            ECG[i] = pot_elec[i-3]-WCT
+function ecg12(ECGstruct::ECG,celAutom::CellulaireAutomaat)
+      get_potential!(celAutom,electrodes)
+      # Wilkinson Central Terminal
+      ECGstruct.elec["WCT"]=(ECGstruct.elec["VL"]+ECGstruct.elec["VF"]+ECGstruct.elec["VR"])/3
+      # compute lead potentials with given formulas
+      ECGstruct.lead["I"]=ECGstruct.elec["VL"]-ECGstruct.elec["VR"]
+      ECGstruct.lead["II"]=ECGstruct.elec["VF"]-ECGstruct.elec["VR"]
+      ECGstruct.lead["III"]=ECGstruct.elec["VF"]-ECGstruct.elec["VL"]
+      ECGstruct.lead["aVL"]=ECGstruct.elec["VL"]-0.5*ECGstruct.elec["VR"]-0.5*ECGstruct.elec["VF"]
+      ECGstruct.lead["aVR"]=ECGstruct.elec["VR"]-0.5*ECGstruct.elec["VL"]-0.5*ECGstruct.elec["VF"]
+      ECGstruct.lead["aVF"]=ECGstruct.elec["VF"]-0.5*ECGstruct.elec["VR"]-0.5*ECGstruct.elec["VL"]
+      leads = ["V1","V2","V3","V4","V5","V6"]
+      for lead in leads
+            ECGstruct.lead[lead]=ECGstruct.elec[lead]-ECGstruct.elec["WCT"]
       end
-      return ECG
 end
 
 
@@ -497,12 +550,12 @@ certain time step. The difference in time between the rows is celAutom.δt.
 @param      (Int64) `amountCalcs`
             number of calculations the simulation consists of
 
-@return     (Array{Int64,2}) `ECG_calcs`
+@return     (Array{Int64,2}) `elec`
             Array with dimensions (amountCalcs,numberOfLeads), filled with zeros.
 """
 function initializeECG(t::String,amountCalcs::Int64)
-      ECG_calcs_init = Dict{String,Array{Float64,1}}()
-      ECG_leads_init = Dict{String,Array{Float64,1}}()
+      elec_init = Dict{String,Array{Float64,1}}()
+      lead_init = Dict{String,Array{Float64,1}}()
 
       if t == "beam"
             name_elecs = ["1","2"]
@@ -515,14 +568,14 @@ function initializeECG(t::String,amountCalcs::Int64)
       end
 
       for name in name_elecs
-            ECG_calcs_init[name] = float(zeros(amountCalcs))
+            elec_init[name] = float(zeros(amountCalcs))
       end
 
       for lead in name_leads
-            ECG_leads_init[lead]=float(zeros(amountCalcs))
+            lead_init[lead]=float(zeros(amountCalcs))
       end
 
-      return ECG((type=t,ECG_calcs=ECG_calcs_init,ECG_leads=ECG_leads_init,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs)...)
+      return ECG((type=t,elec=elec_init,lead=lead_init,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs)...)
 end
 
 
