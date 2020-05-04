@@ -13,6 +13,7 @@ mutable struct ECG
       type::String # "beam","heart3","heart12"
       ECG_calcs::Dict{String,Array{Float64,1}}
       ECG_leads::Dict{String,Array{Float64,1}}
+      wavefront::Array{Float64,1}
       n_calcs::Int64
 end
 
@@ -352,7 +353,7 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
       p_0= 1 # wild guess
       # calculate p, which contains the normal distribution spread of the repolarisation wave
       n_spread = 2 # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
-      #σ = (n_spread*celAutom.δt)/2 # see 'normalDistributionTWave.pdf' on github
+      #σ = n_spread/2 # see 'normalDistributionTWave.pdf' on github
       d = Normal()
       p = repeat([Float64(p_0)],2*n_spread+1)
       for i = 1:2*n_spread+1
@@ -398,7 +399,7 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
             end
       end
 
-      return wavefront
+      ECGstruct.wavefront[celAutom.time] = wavefront
 end
 
 
@@ -418,14 +419,11 @@ The function returns the 3 voltages for the ecg
 
 """
 function ecg3!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
-      wavefront = get_potential!(ECGstruct,celAutom) # array with potentials in each electrode
+      get_potential!(ECGstruct,celAutom) # array with potentials in each electrode
       # compute lead potentials with given formulas
       ECGstruct.ECG_leads["E1"]=ECGstruct.ECG_calcs["VL"]-ECGstruct.ECG_calcs["VR"]
       ECGstruct.ECG_leads["E2"]=ECGstruct.ECG_calcs["VF"]-ECGstruct.ECG_calcs["VR"]
       ECGstruct.ECG_leads["E3"]=ECGstruct.ECG_calcs["VF"]-ECGstruct.ECG_calcs["VL"]
-
-      return wavefront
-
 end
 
 
@@ -444,10 +442,8 @@ This function is especially written to calculate the EG for a beam.
             The potentials in the electrodes '1' and '2'
 """
 function ecg_beam!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
-      wavefront = get_potential!(ECGstruct,celAutom) # array with potentials in each electrode
+      get_potential!(ECGstruct,celAutom) # array with potentials in each electrode
       ECGstruct.ECG_leads["verschil"] = ECGstruct.ECG_calcs["2"] - ECGstruct.ECG_calcs["1"]
-
-      return wavefront
 end
 
 
@@ -519,14 +515,14 @@ function initializeECG(t::String,amountCalcs::Int64)
       end
 
       for name in name_elecs
-            ECG_calcs_init[name] = zeros(amountCalcs)
+            ECG_calcs_init[name] = float(zeros(amountCalcs))
       end
 
       for lead in name_leads
-            ECG_leads_init[lead]=zeros(amountCalcs)
+            ECG_leads_init[lead]=float(zeros(amountCalcs))
       end
 
-      return ECG((type=t,ECG_calcs=ECG_calcs_init,ECG_leads=ECG_leads_init,n_calcs=amountCalcs)...)
+      return ECG((type=t,ECG_calcs=ECG_calcs_init,ECG_leads=ECG_leads_init,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs)...)
 end
 
 
@@ -534,9 +530,9 @@ end
 """
 function updateECG!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
       if ECGstruct.type == "beam"
-            return ecg_beam!(ECGstruct,celAutom)
+            ecg_beam!(ECGstruct,celAutom)
       elseif ECGstruct.type == "heart3"
-            return ecg3!(ECGstruct,celAutom)
+            ecg3!(ECGstruct,celAutom)
       elseif ECGstruct.type == "heart12"
             # doe nog iets anders
       end

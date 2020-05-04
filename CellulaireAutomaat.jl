@@ -3,7 +3,7 @@ using LightGraphs
 using MetaGraphs
 using DelimitedFiles
 using DataStructures
-#using SmoothLivePlot
+using SmoothLivePlot
 # https://github.com/williamjsdavis/SmoothLivePlot.jl
 include("plot_graph.jl")
 
@@ -374,10 +374,11 @@ end
 #           type MetaGraph.
 #   @effect This function calls state1to2! first, then state2to3! and finally
 #           state3to1!.
-function updateState!(celAutom::CellulaireAutomaat)
+function updateState!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
     state1to2!(celAutom)
     state2to3!(celAutom)
     state3to1!(celAutom)
+    updateECG!(ECGstruct,celAutom)
 end
 ##
 #   createCellulaireAutomaat will create an instance of CellulaireAutomaat,
@@ -423,7 +424,7 @@ end
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::String,
-                                    filename_elec::String,dlm::Char,dt::Int64, startwaarden::Array{Any,1},
+                                    filename_elec::String,dlm::Char,dt::Int64, startwaarden,
                                     stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64)
@@ -490,25 +491,22 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
     end
     ECGstruct = initializeECG("heart3",amountCalcs)
     wavefront = zeros(amountCalcs)
-    x_ax = zeros(amountCalcs)
+    x_ax = collect(1:amountCalcs)*celAutom.δt
     # SmoothLivePlot is a quite new package, it seams like it makes plot not accepting any keyword arguments anymore
     # for using SmoothLivePlot, use macro @makeLivePlot and modifyPlotObject!
     #ecg_plot = plot(x_ax,ECG_beam,title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-3,3),label=["1" "2"])
     #wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,2000),ylims=(0,50))
-    #ecg_plot = plot(x_ax,title="3-lead ECG",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-0.1,0.1),label=["E1" "E2" "E3"])
+    #ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_leads["E1"],ECGstruct.ECG_leads["E2"],ECGstruct.ECG_leads["E3"]),title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",xlims=(0,1000),ylims=(-0.02,0.03),label=["E1" "E2" "E3"])
 
-    plotGraph2(celAutom,0,"$folderName/frames_heart", dim)
+    #plotGraph2(celAutom,0,"$folderName/frames_heart", dim)
     printIndex=floor(amountCalcs/amountFrames)
     for i in range(1,stop=amountCalcs)
-        updateState!(celAutom)
+        updateState!(ECGstruct,celAutom)
         if mod(i,printIndex)==0
-            plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heart", dim)
-            wavefront[i] = updateECG!(ECGstruct,celAutom)
-            #(ECG3[i,:],wavefront[i]) = ecg3(celAutom)
-            x_ax[i]=celAutom.time*celAutom.δt
+            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heart", dim)
 
             #modifyPlotObject!(wave_plot,arg1=x_ax[1:i],arg2=wavefront[1:i])
-            #modifyPlotObject!(ecg_plot,arg1=x_ax[1:i],arg2=ECG_beam[:,1:i])
+            #modifyPlotObject!(ecg_plot,arg1=x_ax,arg2=hcat(ECGstruct.ECG_leads["E1"],ECGstruct.ECG_leads["E2"],ECGstruct.ECG_leads["E3"]))
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
@@ -516,9 +514,11 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
     end
-    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_calcs["E1"],ECGstruct.ECG_calcs["E2"],ECGstruct.ECG_calcs["E3"]),title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",xlims=(0,1000),ylims=(-5,5),label=["1" "2" "verschil"])
-    wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1000),ylims=(0,150))
-    png(ecg_plot,"$folderName/ECG3_heart_spiral.png")
+    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_leads["E1"],ECGstruct.ECG_leads["E2"],ECGstruct.ECG_leads["E3"]),
+                    title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
+                    xlims=(0,1000),ylims=(-0.2,0.3),label=["E1" "E2" "E3"])#,layout=(3,1))
+    wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1000),ylims=(0,40000))
+    png(ecg_plot,"$folderName/ECG3_heart_sigma.png")
     png(wave_plot,"$folderName/Wavefront_heart")
 end
 ##
@@ -608,8 +608,8 @@ function main()
     #stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
     #celAutom = createCellulaireAutomaat(graph,"data_tetraeder_beam_elec.dat","column_indices_beam_elec.dat",
-                            ',',dt, startwaarden,stopwaarden,
-                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+    #                        ',',dt, startwaarden,stopwaarden,
+    #                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
 
     ### hart
