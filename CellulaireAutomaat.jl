@@ -483,18 +483,14 @@ end
 #   @post   #amount frames will be made. Each time by calling an updateState to
 #           go to the next state and then calling plotGraph2 to plot the graph.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
-                        amountECG::Int64,celAutom::CellulaireAutomaat, dim::Int64)
+                        amountECG::Int64,typeECG::String,celAutom::CellulaireAutomaat, dim::Int64)
     #this calculates timesteps until we have the amount of necessary frames
     try
         mkdir(folderName)
     catch
     end
-    ECGstruct = initializeECG("heart3",amountCalcs)
+    ECGstruct = initializeECG(typeECG,amountCalcs)
     x_ax = collect(1:amountCalcs)*celAutom.δt
-    # SmoothLivePlot is a quite new package, it seams like it makes plot not accepting any keyword arguments anymore
-    # for using SmoothLivePlot, use macro @makeLivePlot and modifyPlotObject!
-    #ecg_plot = plot(x_ax,ECG_beam,title="EG beam",xlabel="Time",ylabel="Voltage",xlims=(0,2000),ylims=(-3,3),label=["1" "2"])
-    #wave_plot = plot(x_ax,wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,2000),ylims=(0,50))
 
     #plotGraph2(celAutom,0,"$folderName/frames_heartxz", dim)
     printIndex=floor(amountCalcs/amountFrames)
@@ -505,11 +501,8 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
             #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heartxz", dim)
         end
         if mod(i,printIndexECG)==0
-            #ECGleads = hcat(ECGstruct.ECG_leads["I"],ECGstruct.ECG_leads["II"],ECGstruct.ECG_leads["III"])
-            #ecg_plot = plot(x_ax[1:i],ECGleads[1:i,:],
-            #                title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-            #                xlims=(0,1000),ylims=(-0.2,0.3),label=["I" "II" "III"])
-            #display(ecg_plot)
+            plotECG(ECGstruct,celAutom,x_ax,i)
+            # by giving x_ax, this doesn't need to be recalculated every ECG plot
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
@@ -517,12 +510,28 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
     end
-    ecg_plot = plot(x_ax,hcat(ECGstruct.ECG_leads["I"],ECGstruct.ECG_leads["II"],ECGstruct.ECG_leads["III"]),
-                    title="ECG heart",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-                    xlims=(0,1000),ylims=(-0.2,0.3),label=["I" "II" "III"])#,layout=(3,1))
     #wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1500),ylims=(0,40000))
-    #png(ecg_plot,"$folderName/ECG3_heart.png")
     #png(wave_plot,"$folderName/Wavefront_heart")
+    # save the ECG
+    if typeECG == "beam"
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        png(ecg_plot,"$folderName/EG_beam.png")
+        println("\nEG succesfully saved to $folderName/EG_beam.png")
+    elseif typeECG == "heart3"
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        png(ecg_plot,"$folderName/ECG3_heart.png")
+        println("\n3-lead ECG succesfully saved to $folderName/ECG3_heart.png")
+    elseif typeECG == "heart12"
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        png(ecg_plot[1],"$folderName/ECG12_heart(1).png")
+        png(ecg_plot[2],"$folderName/ECG12_heart(2).png")
+        png(ecg_plot[3],"$folderName/ECG12_heart(3).png")
+        png(ecg_plot[4],"$folderName/ECG12_heart(4).png")
+        println("\n12-lead ECG succesfully saved to \n$folderName/ECG12_heart(1).png",
+                "\n$folderName/ECG12_heart(2).png\n$folderName/ECG12_heart(3).png",
+                "\n$folderName/ECG12_heart(4).png")
+    end
+
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken
@@ -631,9 +640,24 @@ function main()
 
     folder="groepje3"
     dim = 2
-    createFrames(folder,200,200,50,celAutom, dim)
+    amountCalcs = 200
+    amountFrames = 200
+    amountECG = 50
+    typeECG = "heart12"
+
+    println("\n#####################################################################")
+    println("δt = ", celAutom.δt, " ms\nδx = ",celAutom.δx, "\nARI_ss_epi = ",
+        celAutom.ARI_ss_epi,"\nARI_ss_endo = ", celAutom.ARI_ss_endo, "\na_epi = ",
+        celAutom.a_epi, "\na_endo = ", celAutom.a_endo, "\nb_epi = ", celAutom.b_epi,
+        "\nb_endo = ", celAutom.b_endo,"\nstartwaarden = ",startwaarden,"\nstopwaarden = ",stopwaarden,
+        "\namountCalcs = ",amountCalcs,"\namountFrames = ",amountFrames,"\namountECG = ",amountECG,
+        "\nType of ECG = ",typeECG,"\nFrequency ECG = ",1/(floor(amountCalcs/amountECG)*dt)," Hz")
+    println("#####################################################################")
+    println("Situation initialized, start cellular automaton now...")
+
+    createFrames(folder,amountFrames,amountCalcs,amountECG,typeECG,celAutom,dim)
     elapsed = time() - start
-    println(elapsed)
+    println("Duration simulation: ",elapsed, "\n")
 end
 
 main()
