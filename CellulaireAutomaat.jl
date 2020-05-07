@@ -11,8 +11,9 @@ mutable struct CellulaireAutomaat
         #1: non-active and can be depolarised -> DI (black)
         #2: active and fires in begin period -> APD (red)
         #3: non-active and can't be depolarised -> DI (green)
-    time::Int64
+    time::Int64#Time since running time in t.u.
     δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
+
     δx::Float64 #the space unit in cm -> 1 s.u. = δx cm
 
     ARI_ss_epi::Float64
@@ -84,7 +85,7 @@ end
 #   @post   nodefillc will assign the color "black" to nodes in state one,
 #           "maroon" to nodes in state two and "red4" to nodes in state three.
 function coloringGraph(celAutom::CellulaireAutomaat)
-    nodecolor = [colorant"black", colorant"red",colorant"green"]
+    nodecolor = [colorant"black", colorant"red",colorant"blue"]
     #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
@@ -175,11 +176,15 @@ end
 #TODO add time fraction so that when node goes from state 3 to 1 in that time,
 # it can be activated -> @param
 function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64,timeFraction::Float64)
-    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
-    if get_prop(celAutom.mg,node,:state)==1||(get_prop(celAutom.mg,node,:state)==3&&get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
+    if get_prop(celAutom.mg,node,:state)==1
         return true
     end
-    return false
+    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
+    if get_prop(celAutom.mg,node,:state)==3
+        return (get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
+    end
+    timeState2and3= timeState3+get_prop(celAutom.mg,node,:APD)
+    return (get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState2and3)
 end
 ##
 #   makeTransition will add the CV*anistropy/dx to every edge with a running
@@ -261,7 +266,7 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
         CV=get_prop(celAutom.mg,key[1],:CV)
         #fraction of the time step to get to the node
-        timeFraction=1-surplus/(CV*ani)
+        timeFraction=1-(surplus*dx)/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
             #activate node
             activate!(celAutom, key[2],timeFraction)
@@ -324,11 +329,12 @@ end
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
 #   @post   If a node has been in state 2 for a time tcounter longer than its APD,
-#           its state will change from '2' to '3'. tcounter will be reset to 0.
+#           its state will change from '2' to '3'. tcounter will be reset to
+#           get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD)
 
 function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
-        if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
+        if get_prop(celAutom.mg,node,:tcounter)+1>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,3)
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD))
         end
@@ -343,12 +349,12 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
-#   @post   If a node in state 3 has a tcounter larger than 18.5 ms,
+#   @post   If a node in state 3 has a tcounter larger than timeState3,
 #           then we set the state to 1
 function state3to1!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,3))
         timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
-        if get_prop(celAutom.mg,node,:tcounter)>=timeState3
+        if get_prop(celAutom.mg,node,:tcounter)+1>=timeState3
             set_prop!(celAutom.mg,node,:state,1)
         end
     end
@@ -425,12 +431,14 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
     end
     celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
-                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
+                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
-        set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
-        set_prop!(graph,node,:tcounter,1)
-        set_prop!(graph,node,:APD,242/celAutom.δt)
+        #CL negative but will invoke the methods so that their minimum values will be induced
+        set_prop!(graph, node,:APD,0)
+        set_prop!(graph,node,:tcounter,-1000)
+        set_APD!(celAutom,node)
+        set_CV!(celAutom,node)
     end
 
     for node in startwaarden
@@ -439,7 +447,7 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
     end
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
-        set_prop!(graph,node,:tcounter,0)
+        set_prop!(graph,node,:tcounter,200/dt)
     end
     return celAutom
 end
@@ -478,8 +486,8 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
-        #TODO title plot with celAutom.time
-        celAutom.time+=celAutom.δt
+        #TODO title plot with celAutom.time*celAutom.δt
+        celAutom.time+=1#1 time step further
     end
 end
 ##
@@ -495,15 +503,21 @@ end
 #   @post   The given node will have its APD property changed to the new value
 #           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
-    DI= get_prop(celAutom.mg, node, :tcounter)
-    T = 1#get_prop(celAutom.mg, node, :T)
+    #CL = DI + APD (previous cycle) to ms
+    CL = (get_prop(celAutom.mg, node, :tcounter) + get_prop(celAutom.mg, node, :APD))*celAutom.δt
+    #minimum value of CL for APD, this only happens when invoked
+    #under conditions which are not normal for a heart
+    if CL<300
+        CL=300
+    end
+    T = 1#get_prop(celAutom.mg, node, :Temp)
 
     #epi APD
-    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-DI*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
+    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-CL/celAutom.b_epi)#Implementation formula in ms
     ARI_epi=ARI_epi/celAutom.δt#ms -> t.u
 
     #endo APD
-    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-DI*celAutom.δt/celAutom.b_endo)#Implementation formula in ms
+    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-CL/celAutom.b_endo)#Implementation formula in ms
     ARI_endo=ARI_endo/celAutom.δt#ms -> t.u
 
     #Real APD
@@ -521,11 +535,17 @@ end
 #   @post   The given node will have its CV property changed to the new value
 #           of: CV = 70.03-52.12*e^(-DI/87.6)
 function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
-    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt/1000#DI in sec
+    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt#DI in milisec
+    #minimum value of DI for CV, this only happens when invoked
+    #under conditions which are not normal for a heart
+    if DI<40
+        DI=40
+    end
     CV=70.03-52.12*exp(-DI/87.6)#cm/sec
     CV=CV*celAutom.δt/1000#transition to cm/t.u.
     CV=CV/celAutom.δx#transition to s.u./t.u.
     set_prop!(celAutom.mg, node,:CV, CV)
+
 end
 ##
 function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64,y_stop::Float64,z_start::Float64,z_stop::Float64)
@@ -543,10 +563,11 @@ function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64
 end
 ##
 function main()
-    start = time()
+    start=time()
     graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
-    startwaarden=get_area(graph, -100.0,20.0, 110.0,125.0,-100.0,100.0)
-    stopwaarden = get_area(graph, -100.0,20.0,125.0,140.0,-100.0,100.0)
+    startwaarden=get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
+    stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
+
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
@@ -558,15 +579,16 @@ function main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
-    #time step
-    dt=Int64(5)
+    #timestep in ms
+    dt=20
 
-    celAutom = createCellulaireAutomaat(graph,dt, startwaarden,stopwaarden,
+    celAutom = createCellulaireAutomaat(graph, dt,startwaarden,stopwaarden,
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
-    folder="plotjes_test4"
+    folder="plotjes"
+
     dim = 2
-    createFrames(folder,200,200,celAutom, dim)
+    createFrames(folder,100,100,celAutom, dim)
     elapsed = time() - start
     println(elapsed)
 end
