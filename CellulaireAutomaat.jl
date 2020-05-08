@@ -92,7 +92,7 @@ end
 #   @post   nodefillc will assign the color "black" to nodes in state one,
 #           "maroon" to nodes in state two and "red4" to nodes in state three.
 function coloringGraph(celAutom::CellulaireAutomaat)
-    nodecolor = [colorant"black", colorant"red",colorant"green"]
+    nodecolor = [colorant"black", colorant"red",colorant"blue"]
     #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
@@ -336,11 +336,12 @@ end
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
 #   @post   If a node has been in state 2 for a time tcounter longer than its APD,
-#           its state will change from '2' to '3'. tcounter will be reset to 0.
+#           its state will change from '2' to '3'. tcounter will be reset to
+#           get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD)
 
 function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
-        if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
+        if get_prop(celAutom.mg,node,:tcounter)+1>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,3)
             set_prop!(celAutom.mg,node,:tcounter,-get_prop(celAutom.mg,node,:APD))
         end
@@ -355,12 +356,12 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
-#   @post   If a node in state 3 has a tcounter larger than 18.5 ms,
+#   @post   If a node in state 3 has a tcounter larger than timeState3,
 #           then we set the state to 1
 function state3to1!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,3))
         timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
-        if get_prop(celAutom.mg,node,:tcounter)>=timeState3
+        if get_prop(celAutom.mg,node,:tcounter)+1>=timeState3
             set_prop!(celAutom.mg,node,:state,1)
         end
     end
@@ -446,12 +447,14 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     end
     celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,elec=dict_elec,time=1,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
-                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
+                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
-        set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
-        set_prop!(graph,node,:tcounter,100)
-        set_prop!(graph,node,:APD,min(ARI_ss_epi,ARI_ss_endo))
+        #CL negative but will invoke the methods so that their minimum values will be induced
+        set_prop!(graph, node,:APD,0)
+        set_prop!(graph,node,:tcounter,-1000)
+        set_APD!(celAutom,node)
+        set_CV!(celAutom,node)
     end
 
     for node in startwaarden
@@ -460,7 +463,7 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     end
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
-        set_prop!(graph,node,:tcounter,0)
+        set_prop!(graph,node,:tcounter,200/dt)
     end
     return celAutom
 end
@@ -546,16 +549,21 @@ end
 #   @post   The given node will have its APD property changed to the new value
 #           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
-    #CL = DI + APD (previous cycle)
-    CL = get_prop(celAutom.mg, node, :tcounter) + get_prop(celAutom.mg, node, :APD)
-    T = 1#get_prop(celAutom.mg, node, :T)
+    #CL = DI + APD (previous cycle) to ms
+    CL = (get_prop(celAutom.mg, node, :tcounter) + get_prop(celAutom.mg, node, :APD))*celAutom.δt
+    #minimum value of CL for APD, this only happens when invoked
+    #under conditions which are not normal for a heart
+    if CL<300
+        CL=300
+    end
+    T = 1#get_prop(celAutom.mg, node, :Temp)
 
     #epi APD
-    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-CL*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
+    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-CL/celAutom.b_epi)#Implementation formula in ms
     ARI_epi=ARI_epi/celAutom.δt#ms -> t.u
 
     #endo APD
-    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-CL*celAutom.δt/celAutom.b_endo)#Implementation formula in ms
+    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-CL/celAutom.b_endo)#Implementation formula in ms
     ARI_endo=ARI_endo/celAutom.δt#ms -> t.u
 
     #Real APD
@@ -573,11 +581,17 @@ end
 #   @post   The given node will have its CV property changed to the new value
 #           of: CV = 70.03-52.12*e^(-DI/87.6)
 function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
-    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt/1000#DI in sec
-    CV=70.03-52.12*exp(-DI/87.6)#cm/sec STEADY STATE
+    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt#DI in milisec
+    #minimum value of DI for CV, this only happens when invoked
+    #under conditions which are not normal for a heart
+    if DI<40
+        DI=40
+    end
+    CV=70.03-52.12*exp(-DI/87.6)#cm/sec
     CV=CV*celAutom.δt/1000#transition to cm/t.u.
     CV=CV/celAutom.δx#transition to s.u./t.u.
     set_prop!(celAutom.mg, node,:CV, CV)
+
 end
 ##
 function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64,y_stop::Float64,z_start::Float64,z_stop::Float64)
@@ -607,8 +621,8 @@ function main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
-    #time step
-    dt=Int64(5)
+    #timestep in ms
+    dt=20
 
     ## balk
     #graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
