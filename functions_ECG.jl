@@ -1,4 +1,4 @@
-RA# loading packages
+# loading packages
 
 using LinearAlgebra
 using LightGraphs
@@ -15,6 +15,8 @@ mutable struct ECG
       lead::Dict{String,Array{Float64,1}}
       wavefront::Array{Float64,1}
       n_calcs::Int64
+      p_0::Float64
+      p::Array{Float64,1}
 end
 
 
@@ -143,7 +145,6 @@ function get_permutation(vertices::Array{Any,1},v_fire::Set{Any})
             return rotation4
         end
     end
-
 end
 
 
@@ -325,22 +326,6 @@ function geval3(tetrahedron::Array{Float64,2},etransition::Array{Float64,1})
 end
 
 
-# this will be needed in the next function, should be runned once
-p_0= 1 # wild guess
-println("p_0 = ",p_0)
-# calculate p, which contains the normal distribution spread of the repolarisation wave
-n_spread = 10 # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
-# fit n_spread for a realistic T-wave
-println("n_spread = ",n_spread)
-σ = n_spread/2 # see 'normalDistributionTWave.pdf' on github
-d = Normal(0,σ)
-p = repeat([Float64(p_0/2)],2*n_spread+1)
-for i = 1:2*n_spread+1
-      p[i] *= pdf(d,i-n_spread-1)
-end
-println("p_0 was reduces by a factor ",1/2," in order to have a smaller T-wave")
-# no reason found yet for this factor
-
 """
     get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
 Iterates over all tetrahedrons in the heart and computes potential in the electrodes
@@ -382,6 +367,9 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
       indices_elec = celAutom.elec # dictionary containing per electrode (key) the indices of the columns that contain the connecting projection vector for the particular electrode
       heart = celAutom.heart
       mg = celAutom.mg
+      p_0 = ECGstruct.p_0
+      p = ECGstruct.p
+      n_spread = Int((length(p)-1)/2)
 
       for i in range(1,stop=size(heart,1)) # iterate over rows 'heart' = 'tetraeder'
             tetraeder = heart[i,:] # info tetrahedron in an array
@@ -397,7 +385,7 @@ function get_potential!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
                         APD += get_prop(celAutom.mg,vertex,:APD)
                   end
                   APD /= length(v_fire)
-                  APD = Int(floor(APD)) # convert APD into time units -> not necessary
+                  APD = floor(Int,APD) # convert APD into time units -> not necessary
 
                   for electrode in name_elec # for each given electrode
                         # dot product of surface normal vector and connecting projection vector for the particular electrode, stored in the tetraeder array
@@ -535,7 +523,7 @@ function ecg12!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
       ECGstruct.lead["II"]=ECGstruct.elec["LL"]-ECGstruct.elec["RA"]
       ECGstruct.lead["III"]=ECGstruct.elec["LL"]-ECGstruct.elec["LA"]
       ECGstruct.lead["aVL"]=ECGstruct.elec["LA"]-0.5*ECGstruct.elec["RA"]-0.5*ECGstruct.elec["LL"]
-      ECGstruct.lead["aVR"]=ECGstruct.elec["RA"]-0.5*ECGstruct.elec["LA"]-0.5*ECGstruct.elec["RA"]
+      ECGstruct.lead["aVR"]=ECGstruct.elec["RA"]-0.5*ECGstruct.elec["LA"]-0.5*ECGstruct.elec["LL"]
       ECGstruct.lead["aVF"]=ECGstruct.elec["LL"]-0.5*ECGstruct.elec["RA"]-0.5*ECGstruct.elec["LA"]
       leads = ["V1","V2","V3","V4","V5","V6"]
       for lead in leads
@@ -560,7 +548,7 @@ certain time step. The difference in time between the rows is celAutom.δt.
 @return     (Array{Int64,2}) `elec`
             Array with dimensions (amountCalcs,numberOfLeads), filled with zeros.
 """
-function initializeECG(t::String,amountCalcs::Int64)
+function initializeECG(t::String,amountCalcs::Int64,celAutom::CellulaireAutomaat)
       elec_init = Dict{String,Array{Float64,1}}()
       lead_init = Dict{String,Array{Float64,1}}()
 
@@ -583,7 +571,24 @@ function initializeECG(t::String,amountCalcs::Int64)
             lead_init[lead]=float(zeros(amountCalcs))
       end
 
-      return ECG((type=t,elec=elec_init,lead=lead_init,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs)...)
+      # this will be needed in get_potential!, but only needs to be calculated once
+      # Make sure there are no other variables called p or p_0.
+      p_0 = 1.0 # wild guess
+      println("p_0 = ",p_0)
+      # calculate p, which contains the normal distribution spread of the repolarisation wave
+      σ = 50/celAutom.δt # see paper, unit = t.u.
+      # number of timesteps on each side of t+APD that will be used to calculate the spread of the T-wave
+      # suggested to take 3σ
+      n_spread = floor(Int64,3*σ)
+      d = Normal(0,σ)
+      p = repeat([Float64(p_0)],2*n_spread+1)
+      for i = 1:2*n_spread+1
+            p[i] *= pdf(d,i-n_spread-1)
+      end
+      #println("p = ",p,"\nsom = ",sum(p),"\nlengte = ",length(p))
+
+
+      return ECG((type=t,elec=elec_init,lead=lead_init,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs,p_0=p_0,p=p)...)
 end
 
 
@@ -597,7 +602,6 @@ function updateECG!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
       elseif ECGstruct.type == "heart12"
             ecg12!(ECGstruct,celAutom)
       end
-
 end
 
 """
@@ -623,19 +627,19 @@ function plotECG(ECGstruct::ECG,celAutom::CellulaireAutomaat,x_ax::Array{Int64,1
             ecg_plot = repeat([plot(1)],4)
             ecg_plot[1] = plot(x_ax[1:i],hcat(ECGstruct.lead["I"],ECGstruct.lead["II"],ECGstruct.lead["III"])[1:i,:],
                       title="12-lead ECG heart (part 1)",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.2,0.3),
+                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.2,0.2),
                       label=["I" "II" "III"])
             ecg_plot[2] = plot(x_ax[1:i],hcat(ECGstruct.lead["aVL"],ECGstruct.lead["aVR"],ECGstruct.lead["aVF"])[1:i,:],
                       title="12-lead ECG heart (part 2)",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.2,0.3),
+                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.2,0.2),
                       label=["aVL" "aVR" "aVF"])
             ecg_plot[3] = plot(x_ax[1:i],hcat(ECGstruct.lead["V1"],ECGstruct.lead["V2"],ECGstruct.lead["V3"])[1:i,:],
-                      title="12-lead ECG heart (part 2)",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.3,0.3),
+                      title="12-lead ECG heart (part 3)",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
+                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.8,0.6),
                       label=["V1" "V2" "V3"])
             ecg_plot[4] = plot(x_ax[1:i],hcat(ECGstruct.lead["V4"],ECGstruct.lead["V5"],ECGstruct.lead["V6"])[1:i,:],
-                      title="12-lead ECG heart (part 2)",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
-                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.2,0.3),
+                      title="12-lead ECG heart (part 4)",xlabel="Time (ms)",ylabel="Voltage (A.U.)",
+                      xlims=(0,ECGstruct.n_calcs*celAutom.δt),ylims=(-0.4,0.4),
                       label=["V4" "V5" "V6"])
             display(ecg_plot[1])
             # we chose to visualise only the 3-lead ecg in runtime, for displaying all 12

@@ -492,7 +492,7 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         mkdir(folderName)
     catch
     end
-    ECGstruct = initializeECG(typeECG,amountCalcs)
+    ECGstruct = initializeECG(typeECG,amountCalcs,celAutom)
     x_ax = collect(1:amountCalcs)*celAutom.δt
 
     #plotGraph2(celAutom,0,"$folderName/frames_heartxz", dim)
@@ -526,13 +526,16 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         println("\n3-lead ECG succesfully saved to $folderName/ECG3_heart.png")
     elseif typeECG == "heart12"
         ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        for plot in ecg_plot
+            display(plot)
+        end
         png(ecg_plot[1],"$folderName/ECG12_heart(1).png")
         png(ecg_plot[2],"$folderName/ECG12_heart(2).png")
         png(ecg_plot[3],"$folderName/ECG12_heart(3).png")
         png(ecg_plot[4],"$folderName/ECG12_heart(4).png")
         println("\n12-lead ECG succesfully saved to \n$folderName/ECG12_heart(1).png",
                 "\n$folderName/ECG12_heart(2).png\n$folderName/ECG12_heart(3).png",
-                "\n$folderName/ECG12_heart(4).png")
+                "\n$folderName/ECG12_heart(4).png\n")
     end
 
 end
@@ -644,8 +647,8 @@ function main()
     startwaarden = [1297,13124]
     stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
     ## spiraalgolf hart
-    #startwaarden=get_area(graph, -100.0,50.0, 110.0,125.0,-100.0,100.0)
-    #stopwaarden = get_area(graph, -100.0,50.0,125.0,140.0,-100.0,100.0)
+    startwaarden = get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
+    stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
 
     celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
                             ',',dt, startwaarden,stopwaarden,
@@ -654,8 +657,8 @@ function main()
 
     folder="groepje3"
     dim = 2
-    amountCalcs = 200
-    amountFrames = 200
+    amountCalcs = 100
+    amountFrames = 100
     amountECG = 50
     typeECG = "heart12"
 
