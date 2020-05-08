@@ -3,6 +3,8 @@ using LightGraphs
 using MetaGraphs
 using DelimitedFiles
 using DataStructures
+using SmoothLivePlot
+# https://github.com/williamjsdavis/SmoothLivePlot.jl
 include("plot_graph.jl")
 
 mutable struct CellulaireAutomaat
@@ -11,8 +13,12 @@ mutable struct CellulaireAutomaat
         #1: non-active and can be depolarised -> DI (black)
         #2: active and fires in begin period -> APD (red)
         #3: non-active and can't be depolarised -> DI (green)
-    time::Int64
+    heart::Array{Any,2} # cf CODE_README
+    elec::Dict{String,Any} # contains the column indices of the projection vector per electrode
+
+    time::Int64#Time since running time in t.u.
     δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
+
     δx::Float64 #the space unit in cm -> 1 s.u. = δx cm
 
     ARI_ss_epi::Float64
@@ -27,6 +33,8 @@ mutable struct CellulaireAutomaat
     #transitions of the active edges
     edgesA::PriorityQueue{Tuple{Int64,Int64}, Float64}
 end
+
+include("functions_ECG.jl")
 
 ##
 #   constructGraph will construct a metagraph with several given properties
@@ -84,7 +92,7 @@ end
 #   @post   nodefillc will assign the color "black" to nodes in state one,
 #           "maroon" to nodes in state two and "red4" to nodes in state three.
 function coloringGraph(celAutom::CellulaireAutomaat)
-    nodecolor = [colorant"black", colorant"red",colorant"green"]
+    nodecolor = [colorant"black", colorant"red",colorant"blue"]
     #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
@@ -175,11 +183,15 @@ end
 #TODO add time fraction so that when node goes from state 3 to 1 in that time,
 # it can be activated -> @param
 function canPassCurrentTo(celAutom::CellulaireAutomaat, node::Int64,timeFraction::Float64)
-    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
-    if get_prop(celAutom.mg,node,:state)==1||(get_prop(celAutom.mg,node,:state)==3&&get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
+    if get_prop(celAutom.mg,node,:state)==1
         return true
     end
-    return false
+    timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
+    if get_prop(celAutom.mg,node,:state)==3
+        return (get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState3)
+    end
+    timeState2and3= timeState3+get_prop(celAutom.mg,node,:APD)
+    return (get_prop(celAutom.mg,node,:tcounter)+timeFraction>=timeState2and3)
 end
 ##
 #   makeTransition will add the CV*anistropy/dx to every edge with a running
@@ -261,7 +273,7 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
         CV=get_prop(celAutom.mg,key[1],:CV)
         #fraction of the time step to get to the node
-        timeFraction=1-surplus/(CV*ani)
+        timeFraction=1-(surplus*dx)/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
             #activate node
             activate!(celAutom, key[2],timeFraction)
@@ -324,13 +336,14 @@ end
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
 #   @post   If a node has been in state 2 for a time tcounter longer than its APD,
-#           its state will change from '2' to '3'. tcounter will be reset to 0.
+#           its state will change from '2' to '3'. tcounter will be reset to
+#           get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD)
 
 function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
-        if get_prop(celAutom.mg,node,:tcounter)>=get_prop(celAutom.mg,node,:APD)
+        if get_prop(celAutom.mg,node,:tcounter)+1>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,3)
-            set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD))
+            set_prop!(celAutom.mg,node,:tcounter,-get_prop(celAutom.mg,node,:APD))
         end
     end
 end
@@ -343,12 +356,12 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
-#   @post   If a node in state 3 has a tcounter larger than 18.5 ms,
+#   @post   If a node in state 3 has a tcounter larger than timeState3,
 #           then we set the state to 1
 function state3to1!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,3))
         timeState3=get_prop(celAutom.mg,node,:APD)/4/celAutom.δt
-        if get_prop(celAutom.mg,node,:tcounter)>=timeState3
+        if get_prop(celAutom.mg,node,:tcounter)+1>=timeState3
             set_prop!(celAutom.mg,node,:state,1)
         end
     end
@@ -362,10 +375,11 @@ end
 #           type MetaGraph.
 #   @effect This function calls state1to2! first, then state2to3! and finally
 #           state3to1!.
-function updateState!(celAutom::CellulaireAutomaat)
+function updateState!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
     state1to2!(celAutom)
     state2to3!(celAutom)
     state3to1!(celAutom)
+    updateECG!(ECGstruct,celAutom)
 end
 ##
 #   createCellulaireAutomaat will create an instance of CellulaireAutomaat,
@@ -410,10 +424,18 @@ end
 #           (ltransition - higher transition) This is the fraction of the
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
-function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Array{Any,1},
+function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::String,
+                                    filename_elec::String,dlm::Char,dt::Int64, startwaarden,
                                     stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64)
+    # construct heart
+    (input_heart, header_heart) = readdlm(filename_tetrahedrons,dlm,header=true)
+
+    # construct dict_elec
+    input_elec = readdlm(filename_elec,dlm,String)
+    dict_elec = Dict( input_elec[i] => parse(Int64,input_elec[i,2]):parse(Int64,input_elec[i,3]) for i=1:size(input_elec,1) )
+
     Priority = PriorityQueue{Tuple{Int64,Int64}, Float64}(Base.Order.Reverse)
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
@@ -423,14 +445,16 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
             end
         end
     end
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
+    celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,elec=dict_elec,time=1,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
-                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)#,tDisp = 100, tSamp = 100)...)
+                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
-        set_prop!(graph,node,:CV,70.03*celAutom.δt/celAutom.δx/1000)
-        set_prop!(graph,node,:tcounter,1)
-        set_prop!(graph,node,:APD,242/celAutom.δt)
+        #CL negative but will invoke the methods so that their minimum values will be induced
+        set_prop!(graph, node,:APD,0)
+        set_prop!(graph,node,:tcounter,-1000)
+        set_APD!(celAutom,node)
+        set_CV!(celAutom,node)
     end
 
     for node in startwaarden
@@ -439,7 +463,7 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
     end
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
-        set_prop!(graph,node,:tcounter,0)
+        set_prop!(graph,node,:tcounter,200/dt)
     end
     return celAutom
 end
@@ -462,25 +486,58 @@ end
 #   @post   #amount frames will be made. Each time by calling an updateState to
 #           go to the next state and then calling plotGraph2 to plot the graph.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
-                        celAutom::CellulaireAutomaat, dim::Int64)
+                        amountECG::Int64,typeECG::String,celAutom::CellulaireAutomaat, dim::Int64)
     #this calculates timesteps until we have the amount of necessary frames
     try
         mkdir(folderName)
     catch
     end
-    plotGraph2(celAutom,0,folderName, dim)
+    ECGstruct = initializeECG(typeECG,amountCalcs,celAutom)
+    x_ax = collect(1:amountCalcs)*celAutom.δt
+
+    #plotGraph2(celAutom,0,"$folderName/frames_heartxz", dim)
     printIndex=floor(amountCalcs/amountFrames)
+    printIndexECG=Int(floor(amountCalcs/amountECG))
     for i in range(1,stop=amountCalcs)
-        updateState!(celAutom)
+        updateState!(ECGstruct,celAutom)
         if mod(i,printIndex)==0
-            plotGraph2(celAutom,Int64(i/printIndex),folderName, dim)
+            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heartxz", dim)
+        end
+        if mod(i,printIndexECG)==0
+            plotECG(ECGstruct,celAutom,x_ax,i)
+            # by giving x_ax, this doesn't need to be recalculated every ECG plot
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
         #TODO title plot with celAutom.time
-        celAutom.time+=celAutom.δt
+        celAutom.time+=1#1 time step further
     end
+    #wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1500),ylims=(0,40000))
+    #png(wave_plot,"$folderName/Wavefront_heart")
+    # save the ECG
+    if typeECG == "beam"
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        png(ecg_plot,"$folderName/EG_beam.png")
+        println("\nEG succesfully saved to $folderName/EG_beam.png")
+    elseif typeECG == "heart3"
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        png(ecg_plot,"$folderName/ECG3_heart.png")
+        println("\n3-lead ECG succesfully saved to $folderName/ECG3_heart.png")
+    elseif typeECG == "heart12"
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+        for plot in ecg_plot
+            display(plot)
+        end
+        png(ecg_plot[1],"$folderName/ECG12_heart(1).png")
+        png(ecg_plot[2],"$folderName/ECG12_heart(2).png")
+        png(ecg_plot[3],"$folderName/ECG12_heart(3).png")
+        png(ecg_plot[4],"$folderName/ECG12_heart(4).png")
+        println("\n12-lead ECG succesfully saved to \n$folderName/ECG12_heart(1).png",
+                "\n$folderName/ECG12_heart(2).png\n$folderName/ECG12_heart(3).png",
+                "\n$folderName/ECG12_heart(4).png\n")
+    end
+
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken
@@ -495,15 +552,21 @@ end
 #   @post   The given node will have its APD property changed to the new value
 #           of: ARI = ARI_ss - a*exp(-DI*celAutom.δt/b)
 function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
-    DI= get_prop(celAutom.mg, node, :tcounter)
-    T = 1#get_prop(celAutom.mg, node, :T)
+    #CL = DI + APD (previous cycle) to ms
+    CL = (get_prop(celAutom.mg, node, :tcounter) + get_prop(celAutom.mg, node, :APD))*celAutom.δt
+    #minimum value of CL for APD, this only happens when invoked
+    #under conditions which are not normal for a heart
+    if CL<300
+        CL=300
+    end
+    T = 1#get_prop(celAutom.mg, node, :Temp)
 
     #epi APD
-    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-DI*celAutom.δt/celAutom.b_epi)#Implementation formula in ms
+    ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-CL/celAutom.b_epi)#Implementation formula in ms
     ARI_epi=ARI_epi/celAutom.δt#ms -> t.u
 
     #endo APD
-    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-DI*celAutom.δt/celAutom.b_endo)#Implementation formula in ms
+    ARI_endo = celAutom.ARI_ss_endo - celAutom.a_endo*exp(-CL/celAutom.b_endo)#Implementation formula in ms
     ARI_endo=ARI_endo/celAutom.δt#ms -> t.u
 
     #Real APD
@@ -521,11 +584,17 @@ end
 #   @post   The given node will have its CV property changed to the new value
 #           of: CV = 70.03-52.12*e^(-DI/87.6)
 function set_CV!(celAutom::CellulaireAutomaat, node::Int64)
-    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt/1000#DI in sec
+    DI=get_prop(celAutom.mg, node, :tcounter)*celAutom.δt#DI in milisec
+    #minimum value of DI for CV, this only happens when invoked
+    #under conditions which are not normal for a heart
+    if DI<40
+        DI=40
+    end
     CV=70.03-52.12*exp(-DI/87.6)#cm/sec
     CV=CV*celAutom.δt/1000#transition to cm/t.u.
     CV=CV/celAutom.δx#transition to s.u./t.u.
     set_prop!(celAutom.mg, node,:CV, CV)
+
 end
 ##
 function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64,y_stop::Float64,z_start::Float64,z_stop::Float64)
@@ -544,9 +613,6 @@ end
 ##
 function main()
     start = time()
-    graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
-    startwaarden=get_area(graph, -100.0,20.0, 110.0,125.0,-100.0,100.0)
-    stopwaarden = get_area(graph, -100.0,20.0,125.0,140.0,-100.0,100.0)
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
@@ -558,17 +624,57 @@ function main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
-    #time step
-    dt=Int64(5)
+    #timestep in ms
+    dt=20
 
-    celAutom = createCellulaireAutomaat(graph,dt, startwaarden,stopwaarden,
-                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+    ## balk
+    #graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
+    # vlakke golf balk
+    #startwaarden = get_area(graph,-10.0,-10.0,-10.0,10.0,0.0,1.0)
+    #stopwaarden = []
+    # spiraalgolf balk
+    #startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
+    #stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
 
-    folder="plotjes_test4"
+    #celAutom = createCellulaireAutomaat(graph,"data_tetraeder_beam_elec.dat","column_indices_beam_elec.dat",
+    #                        ',',dt, startwaarden,stopwaarden,
+    #                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+
+
+    ### hart
+    graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
+    ## vlakke golf hart
+    startwaarden = [1297,13124]
+    stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
+    ## spiraalgolf hart
+    startwaarden = get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
+    stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
+
+    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
+                            ',',dt, startwaarden,stopwaarden,
+                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+
+
+    folder="groepje3"
     dim = 2
-    createFrames(folder,200,200,celAutom, dim)
+    amountCalcs = 100
+    amountFrames = 100
+    amountECG = 50
+    typeECG = "heart12"
+
+    println("\n#####################################################################")
+    println("δt = ", celAutom.δt, " ms\nδx = ",celAutom.δx, "\nARI_ss_epi = ",
+        celAutom.ARI_ss_epi,"\nARI_ss_endo = ", celAutom.ARI_ss_endo, "\na_epi = ",
+        celAutom.a_epi, "\na_endo = ", celAutom.a_endo, "\nb_epi = ", celAutom.b_epi,
+        "\nb_endo = ", celAutom.b_endo,"\nstartwaarden = ",startwaarden,"\nstopwaarden = ",stopwaarden,
+        "\namountCalcs = ",amountCalcs,"\namountFrames = ",amountFrames,"\namountECG = ",amountECG,
+        "\nType of ECG = ",typeECG,"\nFrequency ECG = ",1/(floor(amountCalcs/amountECG)*dt)," Hz")
+    println("#####################################################################")
+    println("Situation initialized, start cellular automaton now...")
+
+    createFrames(folder,amountFrames,amountCalcs,amountECG,typeECG,celAutom,dim)
     elapsed = time() - start
-    println(elapsed)
+    println("Duration simulation: ",elapsed, "\n")
 end
 
 main()
