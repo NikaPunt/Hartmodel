@@ -27,6 +27,14 @@ mutable struct CellulaireAutomaat
 
     #transitions of the active edges
     edgesA::PriorityQueue{Tuple{Int64,Int64}, Float64}
+
+    #exit nodes for purkinje
+    LVexit::Int64
+    RVexit::Int64
+    RVexit_time::Int64
+
+    #steady state CV
+    CV_ss
 end
 
 ##
@@ -152,23 +160,23 @@ end
 #           function and stored as $folder/frame$i.png.
 #   @post   If dim = 2 this will generate a plot of a 2D graph.
 #   @post   If dim = 3 this will generate a plot of a 3D graph.
-function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::Int64)
-    if dim == 3
-        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-        nodefillc = coloringGraph(celAutom)
-        #edgefillc =coloringEdge(celAutom)
-        g2 = graphplot(celAutom.mg,dim=3, x = loc_x, y=loc_y, z=loc_z,
-                        markercolor = nodefillc, linecolor = :black,
-                        markersize = 4, linewidth=2, curves=false)
-        p = plot(g2,show=true,grid=false,showaxis=false)
-        png(p, "$folder/3Dframe$i.png")
-    elseif dim == 2
-        nodefillc = coloringGraph(celAutom)
-        edgefillc =coloringEdge(celAutom)
-        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-        g1=gplot(celAutom.mg,loc_x,loc_z,nodefillc=nodefillc,edgestrokec=edgefillc)
-        draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String,y_start::Float64,y_stop::Float64)
+    nodes=get_area(celAutom.mg,-1000000.0,1000000.0,y_start,y_stop,-1000000.0,10000000.0)
+    nodefillc = coloringGraph(celAutom)[nodes]
+    I=[]
+    j=1
+    for edge in collect(edges(celAutom.mg))
+        if (Int64(edge.src) in nodes) && (Int64(edge.dst) in nodes)
+            append!(I,j)
+        end
+        j=j+1;
     end
+    edgefillc =coloringEdge(celAutom)[I]
+    loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+    print(nv(celAutom.mg))
+    print(size(loc_z))
+    g1=gplot(celAutom.mg,loc_x[nodes],loc_z[nodes],nodefillc=nodefillc,edgestrokec=edgefillc)
+    draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
 end
 
 ## TODO specificatie saai
@@ -216,7 +224,11 @@ end
 #           old_conduction_fraction + CV*ani/dx
 function makeTransition!(celAutom::CellulaireAutomaat)
     for key in keys(celAutom.edgesA)
-        CV = get_prop(celAutom.mg, key[1], :CV)
+        if (get_prop(celAutom.mg, key[1],:celtype)==2) && (get_prop(celAutom.mg, key[2], :celtype)==2)
+            CV = celAutom.CV_ss
+        else
+            CV = get_prop(celAutom.mg, key[1], :CV)
+        end
         ani = get_prop(celAutom.mg, key[1], key[2], :anisotropy)
         dx = get_prop(celAutom.mg, key[1],key[2],:dx)
         celAutom.edgesA[key]+= CV*ani/dx
@@ -415,6 +427,9 @@ end
 #           The b coefficient in the formula for the epicardium
 #   @param  (Float64) b_endo
 #           The b coefficient in the formula for the endocardium
+#   @param  (Int64) RVexit_time
+#           The time (in time units) when the node RVexit will get artifically
+#           excited.
 #   @pre    stopwaarden and startwaarden don't have common values
 #   @post   The embedded MetaGraph has the property state imposed on the nodes.
 #           The state of all nodes except the values in startwaarden are set to
@@ -434,10 +449,12 @@ end
 #           (ltransition - higher transition) This is the fraction of the
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
-function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Array{Any,1},
+function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, δx::Float64, startwaarden::Array{Any,1},
                                     stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
-                                    b_epi::Float64, b_endo::Float64)
+                                    b_epi::Float64, b_endo::Float64,
+                                    LVexit::Int64, RVexit::Int64, RVexit_time::Int64,
+                                    CV_ss::Float64)
     Priority = PriorityQueue{Tuple{Int64,Int64}, Float64}(Base.Order.Reverse)
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
@@ -447,9 +464,11 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
             end
         end
     end
-    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
+    celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=δx, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
-                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)
+                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority,
+                                LVexit=LVexit, RVexit = RVexit,RVexit_time=RVexit_time,
+                                CV_ss=CV_ss)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         #CL negative but will invoke the methods so that their minimum values will be induced
@@ -463,11 +482,52 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, startwaarden::Arr
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,0)
     end
+    set_prop!(graph,LVexit,:state,2)
+    set_prop!(graph,LVexit,:tcounter,0)
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,200/dt)
     end
     return celAutom
+end
+##
+#   plotGraph2 uses the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) to create an image of the (colored)
+#   MetaGraph object.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @param  (Int64) i
+#           This is the number assigned to the end of the name of the
+#           picture file.
+#   @param  (String) folder
+#           this is the name of the folder used to store the pictures. If it
+#           exists it doesn't attempt to make a new one. If it doesn't exist,
+#           the directory will be created.
+#   @param  (Int64) dim
+#           the dimension of the graph. Can be either 2 or 3.
+#   @post   Generates an image of the colored MetaGraph object using the gplot
+#           function and stored as $folder/frame$i.png.
+#   @post   If dim = 2 this will generate a plot of a 2D graph.
+#   @post   If dim = 3 this will generate a plot of a 3D graph.
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::Int64)
+    if dim == 3
+        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+        nodefillc = coloringGraph(celAutom)
+        #edgefillc =coloringEdge(celAutom)
+        g2 = graphplot(celAutom.mg,dim=3, x = loc_x, y=loc_y, z=loc_z,
+                        markercolor = nodefillc, linecolor = :black,
+                        markersize = 4, linewidth=2, curves=false)
+        p = plot(g2,show=true,grid=false,showaxis=false)
+        png(p, "$folder/3Dframe$i.png")
+    elseif dim == 2
+        nodefillc = coloringGraph(celAutom)
+        edgefillc =coloringEdge(celAutom)
+        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+        g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+        draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
+    end
 end
 ##
 #   createFrames will create frames as much as the given amount. This function
@@ -485,8 +545,14 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
+#   @param  (Int64) RVexit_time
+#           The time (in time units) when the node RVexit will get artifically
+#           excited.
 #   @post   #amount frames will be made. Each time by calling an updateState to
 #           go to the next state and then calling plotGraph2 to plot the graph.
+#   @post   Each frame will update celAutom.time by incrementing it by 1 time unit.
+#           If celautom.time reaches RVexit_time, then the node RVexit will go in
+#           state 2.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
                         celAutom::CellulaireAutomaat, dim::Int64)
     #this calculates timesteps until we have the amount of necessary frames
@@ -494,18 +560,22 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         mkdir(folderName)
     catch
     end
-    plotGraph2(celAutom,0,folderName,-100000.0,150.0)
+    plotGraph2(celAutom,0,folderName,dim)
     printIndex=floor(amountCalcs/amountFrames)
     for i in range(1,stop=amountCalcs)
         updateState!(celAutom)
         if mod(i,printIndex)==0
-            plotGraph2(celAutom,Int64(i/printIndex),folderName, -100000.0,150.0)
+            plotGraph2(celAutom,Int64(i/printIndex),folderName, dim)
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
         #TODO title plot with celAutom.time*celAutom.δt
         celAutom.time+=1#1 time step further
+        #If the time is right, we will excite RVexit.
+        if celAutom.time==celAutom.RVexit_time
+            set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
+        end
     end
 end
 ##
@@ -583,6 +653,9 @@ end
 function main()
     start=time()
     graph = constructGraph("data_vertices.dat", "data_edges.dat", ',')
+
+    # startwaarden = [8427]
+    # stopwaarden = []
     startwaarden=get_area(graph, -100.0,70.0, 110.0,125.0,-80.0,1000.0)
     stopwaarden = get_area(graph, -100.0,70.0,125.0,140.0,-80.0,1000.0)
 
@@ -599,9 +672,22 @@ function main()
 
     #timestep in ms
     dt=20
+    #spacestep in cm
+    δx = 1/10
 
-    celAutom = createCellulaireAutomaat(graph, dt,startwaarden,stopwaarden,
-                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+    #CV_ss
+    CV_ss_mps = 2 #m/s
+    CV_ss_sups = CV_ss_mps/100*δx #s.u./s
+    CV_ss_suptu= CV_ss_sups/dt #s.u./t.u.
+
+    LVexit = Int64(8427)
+    RVexit = Int64(5837)
+    time_ms = Int64(20) #na 20 miliseconden moet RVexit oplichten
+    RVexit_time = Int64(ceil(time_ms/dt)) #aantal tijdstappen voordat RVexit moet oplichten.
+
+    celAutom = createCellulaireAutomaat(graph, dt, δx, startwaarden,stopwaarden,
+                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
+                        LVexit, RVexit, RVexit_time, CV_ss_suptu)
 
     folder="plotjesxz"
 
