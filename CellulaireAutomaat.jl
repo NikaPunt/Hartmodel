@@ -547,6 +547,7 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #If the time is right, we will excite RVexit.
         if celAutom.time==RVexit_time
             set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
+            set_prop!(celAutom.mg,celAutom.RVexit,:tcounter, 0)
             for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
                 #anders problemen met edges
                 if !(get_prop(celAutom.mg,buur,:state)==2)
