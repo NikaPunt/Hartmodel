@@ -459,9 +459,15 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, δx::Float64, sta
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
             #anders problemen met edges
-            if !(buur in startwaarden)&&!(buur in stopwaarden)
+            if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
                 enqueue!(Priority,(node, buur),0)
             end
+        end
+    end
+    for buur in collect(neighbors(graph, LVexit))
+        #anders problemen met edges
+        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
+            enqueue!(Priority,(LVexit, buur),0)
         end
     end
     celAutom = CellulaireAutomaat((mg=graph,time=0,δt=dt,δx=δx, ARI_ss_endo=ARI_ss_endo,
@@ -575,6 +581,12 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         #If the time is right, we will excite RVexit.
         if celAutom.time==celAutom.RVexit_time
             set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
+            for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
+                #anders problemen met edges
+                if !(get_prop(celAutom.mg,celAutom.RVexit,:state)==2)
+                    enqueue!(Priority,(celAutom.RVexit, buur),0)
+                end
+            end
         end
     end
 end
@@ -654,10 +666,10 @@ function main()
     start=time()
     graph = constructGraph("data_vertices.dat", "data_edges.dat", ',')
 
-    # startwaarden = [8427]
-    # stopwaarden = []
-    startwaarden=get_area(graph, -100.0,70.0, 110.0,125.0,-80.0,1000.0)
-    stopwaarden = get_area(graph, -100.0,70.0,125.0,140.0,-80.0,1000.0)
+    startwaarden = []
+    stopwaarden = []
+    # startwaarden=get_area(graph, -100.0,70.0, 110.0,125.0,-80.0,1000.0)
+    # stopwaarden = get_area(graph, -100.0,70.0,125.0,140.0,-80.0,1000.0)
 
 
     #epi APD
@@ -689,7 +701,7 @@ function main()
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
                         LVexit, RVexit, RVexit_time, CV_ss_suptu)
 
-    folder="plotjesxz"
+    folder="plotjespurkinjevlak2"
 
     dim = 2
     createFrames(folder,100,100,celAutom, dim)

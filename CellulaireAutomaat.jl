@@ -32,6 +32,13 @@ mutable struct CellulaireAutomaat
 
     #transitions of the active edges
     edgesA::PriorityQueue{Tuple{Int64,Int64}, Float64}
+
+    #exit nodes for purkinje
+    LVexit::Int64
+    RVexit::Int64
+
+    #steady state CV
+    CV_ss
 end
 
 include("functions_ECG.jl")
@@ -205,7 +212,11 @@ end
 #           old_conduction_fraction + CV*ani/dx
 function makeTransition!(celAutom::CellulaireAutomaat)
     for key in keys(celAutom.edgesA)
-        CV = get_prop(celAutom.mg, key[1], :CV)
+        if get_prop(celAutom.mg, key[1],:celtype,2) && get_prop(celAutom.mg, key[2], :celtype,2)
+            CV = celAutom.CV_ss
+        else
+            CV = get_prop(celAutom.mg, key[1], :CV)
+        end
         ani = get_prop(celAutom.mg, key[1], key[2], :anisotropy)
         dx = get_prop(celAutom.mg, key[1],key[2],:dx)
         celAutom.edgesA[key]+= CV*ani/dx
@@ -405,6 +416,9 @@ end
 #           The b coefficient in the formula for the epicardium
 #   @param  (Float64) b_endo
 #           The b coefficient in the formula for the endocardium
+#   @param  (Int64) RVexit_time
+#           The time (in time units) when the node RVexit will get artifically
+#           excited.
 #   @pre    stopwaarden and startwaarden don't have common values
 #   @post   The embedded MetaGraph has the property state imposed on the nodes.
 #           The state of all nodes except the values in startwaarden are set to
@@ -425,10 +439,12 @@ end
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::String,
-                                    filename_elec::String,dlm::Char,dt::Int64, startwaarden,
+                                    filename_elec::String,dlm::Char,dt::Int64, δx::Float64, startwaarden,
                                     stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
-                                    b_epi::Float64, b_endo::Float64)
+                                    b_epi::Float64, b_endo::Float64,
+                                    LVexit::Int64, RVexit::Int64, RVexit_time::Int64,
+                                    CV_ss::Float64)
     # construct heart
     (input_heart, header_heart) = readdlm(filename_tetrahedrons,dlm,header=true)
 
@@ -440,14 +456,21 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
             #anders problemen met edges
-            if !(buur in startwaarden)&&!(buur in stopwaarden)
+            if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
                 enqueue!(Priority,(node, buur),0)
             end
         end
     end
-    celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,elec=dict_elec,time=1,δt=dt,δx=1/10, ARI_ss_endo=ARI_ss_endo,
+    for buur in collect(neighbors(graph, LVexit))
+        #anders problemen met edges
+        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
+            enqueue!(Priority,(LVexit, buur),0)
+        end
+    end
+    celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,elec=dict_elec,time=1,δt=dt,δx=δx, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
-                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority)...)
+                                b_epi=b_epi, b_endo=b_endo, edgesA=Priority,
+                                LVexit=LVexit, RVexit = RVexit,RVexit_time=RVexit_time, CV_ss=CV_ss)...)
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         #CL negative but will invoke the methods so that their minimum values will be induced
@@ -461,6 +484,8 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,0)
     end
+    set_prop!(graph,LVexit,:state,2)
+    set_prop!(graph,LVexit,:tcounter,0)
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,200/dt)
@@ -483,10 +508,17 @@ end
 #   @param  (CellulaireAutomaat) celAutom
 #           An object of the class CellulaireAutomaat that carries an object of
 #           type MetaGraph.
+#   @param  (Int64) RVexit_time
+#           The time (in time units) when the node RVexit will get artifically
+#           excited.
 #   @post   #amount frames will be made. Each time by calling an updateState to
 #           go to the next state and then calling plotGraph2 to plot the graph.
+#   @post   Each frame will update celAutom.time by incrementing it by 1 time unit.
+#           If celautom.time reaches RVexit_time, then the node RVexit will go in
+#           state 2.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
-                        amountECG::Int64,typeECG::String,celAutom::CellulaireAutomaat, dim::Int64)
+                        amountECG::Int64,typeECG::String,celAutom::CellulaireAutomaat,
+                        dim::Int64, RVexit_time::Int64)
     #this calculates timesteps until we have the amount of necessary frames
     try
         mkdir(folderName)
@@ -512,6 +544,16 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
         end
         #TODO title plot with celAutom.time
         celAutom.time+=1#1 time step further
+        #If the time is right, we will excite RVexit.
+        if celAutom.time==RVexit_time
+            set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
+            for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
+                #anders problemen met edges
+                if !(get_prop(celAutom.mg,celAutom.RVexit,:state)==2)
+                    enqueue!(Priority,(celAutom.RVexit, buur),0)
+                end
+            end
+        end
     end
     #wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1500),ylims=(0,40000))
     #png(wave_plot,"$folderName/Wavefront_heart")
@@ -624,8 +666,18 @@ function main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
+
+
     #timestep in ms
     dt=20
+    #spacestep in cm
+    δx = 1/10
+
+    #CV_ss
+    CV_ss_mps = 2 #m/s
+    CV_ss_sups = CV_ss_mps/100*δx #s.u./s
+    CV_ss_suptu= CV_ss_sups/dt #s.u./t.u.
+
 
     ## balk
     #graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
@@ -644,15 +696,20 @@ function main()
     ### hart
     graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
     ## vlakke golf hart
-    startwaarden = [1297,13124]
+    startwaarden = [8427,5837]
     stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
+    LVexit = Int64(8427)
+    RVexit = Int64(5837)
+    time_ms = Int64(20) #na 20 miliseconden moet RVexit oplichten
+    RVexit_time = Int64(ceil(time_ms/dt)) #aantal tijdstappen voordat RVexit moet oplichten.
     ## spiraalgolf hart
-    startwaarden = get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
-    stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
+    # startwaarden = get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
+    # stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
 
     celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
-                            ',',dt, startwaarden,stopwaarden,
-                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
+                            ',',dt, δx,startwaarden,stopwaarden,
+                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
+                            LVexit, RVexit, RVexit_time, CV_ss_suptu)
 
 
     folder="groepje3"
