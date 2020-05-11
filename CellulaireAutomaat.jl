@@ -650,7 +650,7 @@ function main()
     startwaarden = get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
     stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
 
-    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
+    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elecALL.dat","column_indices_elec.dat",
                             ',',dt, startwaarden,stopwaarden,
                             ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
 
@@ -660,7 +660,7 @@ function main()
     amountCalcs = 100
     amountFrames = 100
     amountECG = 50
-    typeECG = "heart12"
+    typeECG = "heart263"
 
     println("\n#####################################################################")
     println("δt = ", celAutom.δt, " ms\nδx = ",celAutom.δx, "\nARI_ss_epi = ",
