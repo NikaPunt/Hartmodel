@@ -479,7 +479,7 @@ function createCellulaireAutomaat(graph::MetaGraph, dt::Int64, δx::Float64, sta
         set_prop!(graph,node,:state,1)
         #CL negative but will invoke the methods so that their minimum values will be induced
         set_prop!(graph, node,:APD,0)
-        set_prop!(graph,node,:tcounter,-1000)
+        set_prop!(graph,node,:tcounter,200/dt)
         set_APD!(celAutom,node)
         set_CV!(celAutom,node)
     end
@@ -585,7 +585,11 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
             for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
                 #anders problemen met edges
                 if !(get_prop(celAutom.mg,buur,:state)==2)
-                    enqueue!(celAutom.edgesA,(celAutom.RVexit, buur),0)
+                    try
+                        enqueue!(celAutom.edgesA,(celAutom.RVexit, buur),0)
+                    catch
+                        celAutom.edgesA[tuple(celAutom.RVexit, buur)]=0
+                    end
                 end
             end
         end
@@ -667,9 +671,8 @@ function main()
     start=time()
     graph = constructGraph("data_vertices.dat", "data_edges.dat", ',')
 
-    startwaarden=get_area(graph, -100.0,70.0, 110.0,125.0,-80.0,1000.0)
-    stopwaarden = get_area(graph, -100.0,70.0,125.0,140.0,-80.0,1000.0)
-
+    startwaarden = []
+    stopwaarden = []
 
     #epi APD
     ARI_ss_epi = Float64(392.61)
