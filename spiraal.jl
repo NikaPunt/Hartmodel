@@ -583,8 +583,8 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
             set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
             for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
                 #anders problemen met edges
-                if !(get_prop(celAutom.mg,celAutom.RVexit,:state)==2)
-                    enqueue!(Priority,(celAutom.RVexit, buur),0)
+                if !(get_prop(celAutom.mg,buur,:state)==2)
+                    enqueue!(celAutom.edgesA,(celAutom.RVexit, buur),0)
                 end
             end
         end
@@ -701,7 +701,7 @@ function main()
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
                         LVexit, RVexit, RVexit_time, CV_ss_suptu)
 
-    folder="plotjespurkinjevlak2"
+    folder="plotjespurkinjevlak"
 
     dim = 2
     createFrames(folder,100,100,celAutom, dim)

@@ -549,8 +549,8 @@ function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int6
             set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
             for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
                 #anders problemen met edges
-                if !(get_prop(celAutom.mg,celAutom.RVexit,:state)==2)
-                    enqueue!(Priority,(celAutom.RVexit, buur),0)
+                if !(get_prop(celAutom.mg,buur,:state)==2)
+                    enqueue!(celAutom.edgesA,(celAutom.RVexit, buur),0)
                 end
             end
         end
