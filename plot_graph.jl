@@ -1,7 +1,6 @@
 ################################################################################
 ########
-######## Script with all functions necessary for plotting. This is loaded in
-######## functions_AP.jl
+######## Script with all functions necessary for plotting.
 ########
 ########
 ################################################################################
@@ -18,56 +17,11 @@ using Plots
 using GraphRecipes
 # theme(:juno)
 
-
-# create type structure to set model- and simulation- specific details
-
-mutable struct Model
-    k::Float64
-    a::Float64
-    ϵ0::Float64
-    μ1::Float64
-    μ2::Float64
-    dim::Int
-    D::Float64 # diffusion coefficient in isotropic case
-end
-
-mutable struct Simulation
-    δx::Float64 # place discretizations in isotropic case
-    δt::Float64
-    t_sample::Int
-    t_display::Int
-    Ntime::Int
-    reaction::Bool #1: reaction part included, 0: pure diffusion
-    diffusion::Bool
-end
-
-################################################################################
-########
-######## function that assigns color ID to the u-values in the metagraph
-########
-######## input :mg, a metagraph
-######## levels, an array that contains all the levels (so ranges of the colors)
-########
-######## output : An array with for each vertex a color ID.
-########
-################################################################################
-function colorize(mg::MetaGraph,levels::Array{Float64,1})
-    col = zeros(Int,nv(mg))
-    for vi in collect(vertices(mg))
-        u = get_prop(mg,vi,:u)
-        col[Int(vi)] = searchsortedfirst(levels,u)
-    end
-    return col
-end
-################################################################################
-########
-######## function that returns the coordinates of the vertices.
-########
-######## input :mg, a metagraph
-########
-######## output: 3 lists that contain the x-,y- and z-values resp of each vertex
-########
-################################################################################
+##
+# function that returns the coordinates of the vertices.
+#
+#   @param (MetaGraph) mg
+#   @return 3 lists that contain the x-,y- and z-values resp of each vertex
 function get_coordinates(mg::MetaGraph)
     loc_x = zeros(nv(mg))
     loc_y = zeros(nv(mg))
@@ -79,130 +33,125 @@ function get_coordinates(mg::MetaGraph)
     end
     return loc_x,loc_y,loc_z
 end
-################################################################################
-########
-######## function that generates a frame of the graph at one timestep. It saves
-######## the gplot as a PNG. This is done because this can then afterwards be
-######## plotted and used in a gif. This is not supported for gplot.
-########
-######## input :mg, a metagraph
-########
-######## output : frame.png
-########
-################################################################################
-function plot_the_graph(mg::MetaGraph,t::Int32)
-    levels = [-2.0,-1.0,0.0,0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2.0,5.0,10.0]
-    membership = colorize(mg,levels)
-    c1 = colorant"red"
-    c2 = colorant"yellow"
-    nodecolor = [colorant"black", colorant"maroon",colorant"red4",colorant"darkred",colorant"firebrick4",
-    colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",
-    colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2",
-     colorant"yellow"]
-    nodefillc = nodecolor[membership]
-    loc_x,loc_y,loc_z = get_coordinates(mg)
-    g1 = gplot(mg,loc_x,loc_y,nodefillc=nodefillc)
-    draw(PNG("frame$t.png", 16cm, 16cm), g1)
+##
+#   plotGraph2 uses the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) to create an image of the (colored)
+#   MetaGraph object.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @param  (Int64) i
+#           This is the number assigned to the end of the name of the
+#           picture file.
+#   @param  (String) folder
+#           this is the name of the folder used to store the pictures. If it
+#           exists it doesn't attempt to make a new one. If it doesn't exist,
+#           the directory will be created.
+#   @post   Generates an image of the colored MetaGraph object using the gplot
+#           function and stored as $folder/frame$i.png.
+#   @post   this will generate a plot of a 2D graph.
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
+    nodefillc = coloringNodes(celAutom)
+    edgefillc =coloringEdge(celAutom)
+    loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+    g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+    draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
 end
-
-
-################################################################################
-########
-######## function that plots the graph in 3D at one timestep.
-########
-######## input :mg, a metagraph
-########
-######## output : PNG and plot
-########
-################################################################################
-function plot_graph_extended(g::MetaGraph,m::Model,t)
-    X,Y,Z = get_coordinates(g)
-    levels = collect(0:.1:1.0)
-    membership = colorize(g,levels)
-    c = range(colorant"blue", stop=colorant"red", length=size(levels,1)+1)
-    markerc = c[membership]
-    g2 = graphplot(g,dim=m.dim, x = X, y=Y, z=Z, markercolor=markerc,linecolor=:black,curves=false)
-    p = plot(g2,show=true,grid=false,showaxis=false)
-    display(p)
-    png(p, "3Dframe$t.png")
-    # draw(PNG("3Dframe$t.png", 16cm, 16cm), g2)
-end
-
-################################################################################
-########
-######## function that calculates the voltage output measured by ECG, i.e.
-######## the sum of the u values of all the vertices
-########
-######## input :mg, a metagraph
-########
-######## output : a Float sum_u
-########
-################################################################################
-function ecg(g::MetaGraph)
-    sum_u = 0
-    for i in range(1,stop=nv(g))
-        sum_u += get_prop(g,i,:u)
+##
+#   coloringNodes will return an array of colors that can color the nodes of
+#   the MetaGraph embedded in the given CellulaireAutomaat. This array can be
+#   used as the nodefillc array used in the gplot function.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   nodefillc will assign the color "black" to nodes in state one,
+#           "maroon" to nodes in state two and "red4" to nodes in state three.
+#   @return Returns "nodefillc", an array of type Array{RGB{Normed{UInt8, 8}},1}
+#           with the needed coloring for the gplot function.
+function coloringNodes(celAutom::CellulaireAutomaat)
+    nodecolor = [colorant"black", colorant"firebrick",colorant"blue"]
+    #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
+    #nv = number of vertices
+    membership = ones(Int64, nv(celAutom.mg))
+    for i in range(1,stop=nv(celAutom.mg))
+        membership[i]=get_prop(celAutom.mg,i,:state)
     end
-    return sum_u
+    return nodefillc = nodecolor[membership]
 end
-
-################################################################################
-########
-######## function that plots the u and v values over the range of vertices
-######## (so in space, for one fixed time)
-########
-######## input :filename_sampling, the filename of the data file that contains
-######## the u,v for all the vertices (normally sampling_data$i.txt)
-########
-######## output : two plots, one for u and for v
-########
-################################################################################
-function plot_uv(filename_sampling::String)
-    input_vertices = readdlm(filename_sampling,',',skipstart = 1)
-    p1 = plot(input_vertices[:,1],input_vertices[:,2], color="blue",label="u")
-    xlabel!("vertices")
-    ylabel!("u")
-    p2 = plot(input_vertices[:,1],input_vertices[:,3], color="red",label="v")
-    xlabel!("vertices")
-    ylabel!("v")
-    display(p1)
-    display(p2)
-end
-
-################################################################################
-########
-######## function that plots the u and v values of one vertex in time
-########
-######## input : vertex, the vertex you want the u v values from
-######## s, an object of type Simulation
-########
-######## output : two plots, one for u and for v
-########
-################################################################################
-function plot_utvt(vertex::Int,s::Simulation)
-    N = s.Ntime
-    dt = s.t_sample
-    ut = zeros(Int(N/dt))
-    vt = zeros(Int(N/dt))
-    cnt = 1
-    while cnt <= Int(N/dt)
-        t = cnt*dt
-        #println(t)
-        t = Int(t)
-        filename = "output/sampling_data$t.txt"
-        data = readdlm(filename,',',skipstart=1)
-        ut[cnt] = data[vertex,2]
-        vt[cnt] = data[vertex,3]
-        cnt += 1
+##
+#   coloringEdge will return an array of colors that can color the edges of
+#   the MetaGraph embedded in the given CellulaireAutomaat. This array can be
+#   used as the edgestrokec array used in the gplot function.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @post   The edges will be colored in a spectrum from white (not excited at all)
+#           to dark red (completely excited),
+#           depending on the ltransition and/or htransition in the edge.
+#           Edges recovering from excitation will be colored green.
+#   @return Returns colors, an array of type Array{RGB{Normed{UInt8, 8}},1}
+#           with the needed coloring for the gplot function.
+function coloringEdge(celAutom::CellulaireAutomaat)
+    edgecolor = [colorant"black", colorant"red"]
+    #ne = number of edges
+    membership=ones(Int64,ne(celAutom.mg))
+    j=1
+    for edge in collect(edges(celAutom.mg))
+        try
+            celAutom.edgesA[tuple(edge.src,edge.dst)]
+            membership[j]=2
+        catch
+        end
+        try
+            celAutom.edgesA[tuple(edge.dst,edge.src)]
+            membership[j]=2
+        catch
+        end
+        j+=1
     end
-    t = range(1,stop=s.Ntime,length=Int(N/dt))
-    p1 = plot(t,ut,color="blue",label="u")
-    xlabel!("time t")
-    ylabel!("u")
-    p2 = plot(t,vt,color="red",label="v")
-    xlabel!("time t")
-    ylabel!("v")
-    display(p1)
-    display(p2)
-    png(p1, "AP.png")
+    return colors=edgecolor[membership]
+end
+##
+#   constructGraph will construct a metagraph with several given properties
+#   that are described in the header of the input files.
+#
+#   @param  (String) filename_vertices
+#           This is the name of the file to be read containing the vertices
+#   @param  (String) filename_edges
+#           This is the name of the file to be read containing the edges
+#   @param  (Char)  delimiter
+#           This is the delimiter symbol that separates the streamed string
+#           into parameter values.
+#   @post   The metagraph object will get all the properties described in the
+#           file names.
+#   @return Returns a MetaGraph object with the properties described in
+#           filename_edges and filename_vertices.
+function constructGraph(filename_vertices::String,filename_edges::String,delimiter::Char)
+    input_vertices = readdlm(filename_vertices,delimiter)
+    input_edges = readdlm(filename_edges,delimiter)
+    # define metagraph
+    mg = MetaGraph(SimpleGraph())
+    # add vertices
+    for i in range(2,stop=size(input_vertices,1))
+        # add one vertex
+        add_vertex!(mg)
+        # add other labels
+        for j in range(2,stop=size(input_vertices,2))
+            set_prop!(mg,Int(input_vertices[i,1]),Symbol(input_vertices[1,j]), input_vertices[i,j])
+        end
+    end
+    # add edges
+    for i in range(2,stop=size(input_edges,1))
+        add_edge!(mg,Int(input_edges[i,1]),Int(input_edges[i,2]))
+        # add labels
+        # println(input_edges[i,1]," ",input_edges[i,2])
+        for j in range(3,stop=size(input_edges,2))
+            set_prop!(mg,Int(input_edges[i,1]),Int(input_edges[i,2]),Symbol(input_edges[1,j]),input_edges[i,j])
+        end
+    end
+    println("Graph check!")
+    return mg
 end
