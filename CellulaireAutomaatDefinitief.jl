@@ -3,8 +3,6 @@ using LightGraphs
 using MetaGraphs
 using DelimitedFiles
 using DataStructures
-using SmoothLivePlot
-# https://github.com/williamjsdavis/SmoothLivePlot.jl
 include("plot_graph.jl")
 
 mutable struct CellulaireAutomaat
@@ -13,8 +11,8 @@ mutable struct CellulaireAutomaat
         #1: non-active and can be depolarised -> DI (black)
         #2: active and fires in begin period -> APD (red)
         #3: non-active and can't be depolarised -> DI (green)
-    heart::Array{Any,2} # cf CODE_README
-    elec::Dict{String,Any} # contains the column indices of the projection vector per electrode
+    heart::Array{Any,2} # contains all tetrahedrons that make up the heart mesh, as well as the values of the projection vectors per electrode
+    indices_elec::Dict{String,Any} # In which column the projection vector of a particular electrode is stored
 
     time::Int64#Time since running time in t.u.
     δt::Int64 #the time unit in ms -> 1 t.u. = δt ms
@@ -36,6 +34,7 @@ mutable struct CellulaireAutomaat
     #exit nodes for purkinje
     LVexit::Int64
     RVexit::Int64
+    RVexit_time::Int64
 
     #steady state CV
     CV_ss
@@ -79,7 +78,7 @@ function constructGraph(filename_vertices::String,filename_edges::String,delimit
             set_prop!(mg,Int(input_edges[i,1]),Int(input_edges[i,2]),Symbol(input_edges[1,j]),input_edges[i,j])
         end
     end
-    #purkinje
+    #purkinje (group 2 said this peace of code isn't necessary)
     #add_edge!(mg,1297,13124)
     #set_prop!(mg,1297,13124,:anisotropy,1)
     #set_prop!(mg,1297,13124,:dx,0.01)
@@ -99,15 +98,12 @@ end
 #   @post   nodefillc will assign the color "black" to nodes in state one,
 #           "maroon" to nodes in state two and "red4" to nodes in state three.
 function coloringGraph(celAutom::CellulaireAutomaat)
-    nodecolor = [colorant"black", colorant"red",colorant"blue"]
+    nodecolor = [colorant"black", colorant"firebrick",colorant"blue"]
     #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
     #nv = number of vertices
     membership = ones(Int64, nv(celAutom.mg))
-    for node in filter_vertices(celAutom.mg,:state,2)
-        membership[node]=2
-    end
-    for node in filter_vertices(celAutom.mg,:state,3)
-        membership[node]=3
+    for i in range(1,stop=nv(celAutom.mg))
+        membership[i]=get_prop(celAutom.mg,i,:state)
     end
     return nodefillc = nodecolor[membership]
 end
@@ -166,24 +162,25 @@ end
 #           function and stored as $folder/frame$i.png.
 #   @post   If dim = 2 this will generate a plot of a 2D graph.
 #   @post   If dim = 3 this will generate a plot of a 3D graph.
-function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::Int64)
-    if dim == 3
-        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-        nodefillc = coloringGraph(celAutom)
-        #edgefillc =coloringEdge(celAutom)
-        g2 = graphplot(celAutom.mg,dim=3, x = loc_x, y=loc_y, z=loc_z,
-                        markercolor = nodefillc, linecolor = :black,
-                        markersize = 4, linewidth=2, curves=false)
-        p = plot(g2,show=true,grid=false,showaxis=false)
-        png(p, "$folder/3Dframe$i.png")
-    elseif dim == 2
-        nodefillc = coloringGraph(celAutom)
-        edgefillc =coloringEdge(celAutom)
-        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-        g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
-        draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String,y_start::Float64,y_stop::Float64)
+    nodes=get_area(celAutom.mg,-1000000.0,1000000.0,y_start,y_stop,-1000000.0,10000000.0)
+    nodefillc = coloringGraph(celAutom)[nodes]
+    I=[]
+    j=1
+    for edge in collect(edges(celAutom.mg))
+        if (Int64(edge.src) in nodes) && (Int64(edge.dst) in nodes)
+            append!(I,j)
+        end
+        j=j+1;
     end
+    edgefillc =coloringEdge(celAutom)[I]
+    loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+    print(nv(celAutom.mg))
+    print(size(loc_z))
+    g1=gplot(celAutom.mg,loc_x[nodes],loc_z[nodes],nodefillc=nodefillc,edgestrokec=edgefillc)
+    Plots.draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
 end
+
 ##
 #   canTransitionInto will return false if and only if conduction can not travel
 #   to the given node. This is a simple check of the node's state.
@@ -212,11 +209,7 @@ end
 #           old_conduction_fraction + CV*ani/dx
 function makeTransition!(celAutom::CellulaireAutomaat)
     for key in keys(celAutom.edgesA)
-        if get_prop(celAutom.mg, key[1],:celtype,2) && get_prop(celAutom.mg, key[2], :celtype,2)
-            CV = celAutom.CV_ss
-        else
-            CV = get_prop(celAutom.mg, key[1], :CV)
-        end
+        CV = get_prop(celAutom.mg, key[1], :CV)
         ani = get_prop(celAutom.mg, key[1], key[2], :anisotropy)
         dx = get_prop(celAutom.mg, key[1],key[2],:dx)
         celAutom.edgesA[key]+= CV*ani/dx
@@ -282,7 +275,13 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         #properties of current edge
         dx=get_prop(celAutom.mg, key[1],key[2],:dx)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
-        CV=get_prop(celAutom.mg,key[1],:CV)
+        #If it's purkinje channel
+        if (get_prop(celAutom.mg, key[1],:celtype)==2) && (get_prop(celAutom.mg, key[2], :celtype)==2)
+            CV = celAutom.CV_ss
+        #if not
+        else
+            CV = get_prop(celAutom.mg, key[1], :CV)
+        end
         #fraction of the time step to get to the node
         timeFraction=1-(surplus*dx)/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
@@ -299,7 +298,13 @@ function handleSurplus(celAutom::CellulaireAutomaat)
                     #get different properties of new edge
                     dx2=get_prop(celAutom.mg, key[2],node,:dx)
                     ani2=get_prop(celAutom.mg,key[2],node,:anisotropy)
-                    CV2=get_prop(celAutom.mg,key[2],:CV)
+                    #If it's purkinje channel
+                    if (get_prop(celAutom.mg, key[2],:celtype)==2) && (get_prop(celAutom.mg, node, :celtype)==2)
+                        CV2 = celAutom.CV_ss
+                    #if not
+                    else
+                        CV2 = get_prop(celAutom.mg, key[2], :CV)
+                    end
                     #calculate the new transition
                     newTransition = surplus*dx/dx2*ani2/ani*CV2/CV
                     #set the transition on the max of the current and new transition
@@ -354,7 +359,7 @@ function state2to3!(celAutom::CellulaireAutomaat)
     for node in collect(filter_vertices(celAutom.mg,:state,2))
         if get_prop(celAutom.mg,node,:tcounter)+1>=get_prop(celAutom.mg,node,:APD)
             set_prop!(celAutom.mg,node,:state,3)
-            set_prop!(celAutom.mg,node,:tcounter,-get_prop(celAutom.mg,node,:APD))
+            set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)-get_prop(celAutom.mg,node,:APD))
         end
     end
 end
@@ -439,7 +444,7 @@ end
 #           conduction in the edge going from the higher numbered node to
 #           the lower numbered node.
 function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::String,
-                                    filename_elec::String,dlm::Char,dt::Int64, δx::Float64, startwaarden,
+                                    filename_elec::String,dlm::Char,dt::Int64, δx::Float64, startwaarden::Array{Any,1},
                                     stopwaarden::Array{Any,1}, ARI_ss_endo::Float64,
                                     ARI_ss_epi::Float64, a_epi::Float64, a_endo::Float64,
                                     b_epi::Float64, b_endo::Float64,
@@ -456,26 +461,29 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
             #anders problemen met edges
-            if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
+            if !(buur in startwaarden) &&!(buur in stopwaarden) #&&!(buur==RVexit) && !(buur == LVexit) #comment last two for spiral
                 enqueue!(Priority,(node, buur),0)
             end
         end
     end
-    for buur in collect(neighbors(graph, LVexit))
+    #for buur in collect(neighbors(graph, LVexit)) #comment for spiral
         #anders problemen met edges
-        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
-            enqueue!(Priority,(LVexit, buur),0)
-        end
-    end
-    celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,elec=dict_elec,time=1,δt=dt,δx=δx, ARI_ss_endo=ARI_ss_endo,
+#        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
+#            enqueue!(Priority,(LVexit, buur),0)
+#        end
+#    end
+    celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,indices_elec=dict_elec,time=1,
+                                δt=dt,δx=δx, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
                                 b_epi=b_epi, b_endo=b_endo, edgesA=Priority,
-                                LVexit=LVexit, RVexit = RVexit,RVexit_time=RVexit_time, CV_ss=CV_ss)...)
+                                LVexit=LVexit, RVexit = RVexit,RVexit_time=RVexit_time,
+                                CV_ss=CV_ss)...)
+    # TODO fix dat time ook nul kan zijn
     for node in collect(vertices(graph))
         set_prop!(graph,node,:state,1)
         #CL negative but will invoke the methods so that their minimum values will be induced
         set_prop!(graph, node,:APD,0)
-        set_prop!(graph,node,:tcounter,-1000)
+        set_prop!(graph,node,:tcounter,-1000) # spiral: -1000, plane wave: 200/dt
         set_APD!(celAutom,node)
         set_CV!(celAutom,node)
     end
@@ -484,13 +492,52 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
         set_prop!(graph,node,:state,2)
         set_prop!(graph,node,:tcounter,0)
     end
-    set_prop!(graph,LVexit,:state,2)
-    set_prop!(graph,LVexit,:tcounter,0)
+    #set_prop!(graph,LVexit,:state,2) # comment for spiral
+    #set_prop!(graph,LVexit,:tcounter,0) # comment for spiral
     for node in stopwaarden
         set_prop!(graph,node,:state,2)
-        set_prop!(graph,node,:tcounter,200/dt)
+        set_prop!(graph,node,:tcounter,0)
     end
     return celAutom
+end
+##
+#   plotGraph2 uses the MetaGraph object embedded in the given
+#   CellulaireAutomaat object (celAutom) to create an image of the (colored)
+#   MetaGraph object.
+#
+#   @param  (CellulaireAutomaat) celAutom
+#           An object of the class CellulaireAutomaat that carries an object of
+#           type MetaGraph.
+#   @param  (Int64) i
+#           This is the number assigned to the end of the name of the
+#           picture file.
+#   @param  (String) folder
+#           this is the name of the folder used to store the pictures. If it
+#           exists it doesn't attempt to make a new one. If it doesn't exist,
+#           the directory will be created.
+#   @param  (Int64) dim
+#           the dimension of the graph. Can be either 2 or 3.
+#   @post   Generates an image of the colored MetaGraph object using the gplot
+#           function and stored as $folder/frame$i.png.
+#   @post   If dim = 2 this will generate a plot of a 2D graph.
+#   @post   If dim = 3 this will generate a plot of a 3D graph.
+function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String, dim::Int64)
+    if dim == 3
+        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+        nodefillc = coloringGraph(celAutom)
+        #edgefillc =coloringEdge(celAutom)
+        g2 = graphplot(celAutom.mg,dim=3, x = loc_x, y=loc_y, z=loc_z,
+                        markercolor = nodefillc, linecolor = :black,
+                        markersize = 4, linewidth=2, curves=false)
+        p = plot(g2,show=true,grid=false,showaxis=false)
+        png(p, "$folder/3Dframe$i.png")
+    elseif dim == 2
+        nodefillc = coloringGraph(celAutom)
+        edgefillc =coloringEdge(celAutom)
+        loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
+        g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+        GraphPlot.draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
+    end
 end
 ##
 #   createFrames will create frames as much as the given amount. This function
@@ -517,70 +564,79 @@ end
 #           If celautom.time reaches RVexit_time, then the node RVexit will go in
 #           state 2.
 function createFrames(folderName::String, amountFrames::Int64, amountCalcs::Int64,
-                        amountECG::Int64,typeECG::String,celAutom::CellulaireAutomaat,
-                        dim::Int64, RVexit_time::Int64)
+                        amountECG::Int64,typeECG::String,celAutom::CellulaireAutomaat, dim::Int64)
     #this calculates timesteps until we have the amount of necessary frames
     try
         mkdir(folderName)
     catch
     end
+
     ECGstruct = initializeECG(typeECG,amountCalcs,celAutom)
     x_ax = collect(1:amountCalcs)*celAutom.δt
 
-    #plotGraph2(celAutom,0,"$folderName/frames_heartxz", dim)
+    plotGraph2(celAutom,0,folderName,dim)
     printIndex=floor(amountCalcs/amountFrames)
     printIndexECG=Int(floor(amountCalcs/amountECG))
     for i in range(1,stop=amountCalcs)
         updateState!(ECGstruct,celAutom)
         if mod(i,printIndex)==0
-            #plotGraph2(celAutom,Int64(i/printIndex),"$folderName/frames_heartxz", dim)
+            plotGraph2(celAutom,Int64(i/printIndex),folderName, dim)
         end
-        if mod(i,printIndexECG)==0
-            plotECG(ECGstruct,celAutom,x_ax,i)
+        if mod(i,printIndexECG)==1
+            if i != 1 # so that i-printIndexECG >= 0
+                plotECG(ECGstruct,celAutom,x_ax,i-printIndexECG,i)
+            end
             # by giving x_ax, this doesn't need to be recalculated every ECG plot
         end
         for node in collect(vertices(celAutom.mg))
             set_prop!(celAutom.mg,node,:tcounter,get_prop(celAutom.mg,node,:tcounter)+1)
         end
-        #TODO title plot with celAutom.time
+        #TODO title plot with celAutom.time*celAutom.δt
         celAutom.time+=1#1 time step further
         #If the time is right, we will excite RVexit.
-        if celAutom.time==RVexit_time
+        if celAutom.time==celAutom.RVexit_time
             set_prop!(celAutom.mg,celAutom.RVexit,:state,2)
             set_prop!(celAutom.mg,celAutom.RVexit,:tcounter, 0)
             for buur in collect(neighbors(celAutom.mg, celAutom.RVexit))
                 #anders problemen met edges
                 if !(get_prop(celAutom.mg,buur,:state)==2)
-                    enqueue!(celAutom.edgesA,(celAutom.RVexit, buur),0)
+                    try
+                        enqueue!(celAutom.edgesA,(celAutom.RVexit, buur),0)
+                    catch
+                        celAutom.edgesA[tuple(celAutom.RVexit, buur)]=0
+                    end
                 end
             end
         end
     end
-    #wave_plot = plot(x_ax,ECGstruct.wavefront,title="Area wavefront",xlabel="Time",ylabel="Area (mm^2)",xlims=(0,1500),ylims=(0,40000))
-    #png(wave_plot,"$folderName/Wavefront_heart")
+    wave_plot = Plots.plot(x_ax,ECGstruct.wavefront,title="Oppervlakte golffront",xlabel="Tijd (ms)",ylabel="Oppervlakte (mm^2)",xlims=(0,celAutom.δt*amountCalcs),ylims=(0,40000))
+    wave_plot = figure(figsize=(4,6))
+    PyPlot.plot(x_ax,ECGstruct.wavefront)
+    title("Oppervlakte golffront");xlabel("Tijd (ms)");ylabel("Oppervlakte (mm²)"),xlim(0,celAutom.δt*amountCalcs);ylim(0,40000)
+    wave_plot.savefig("$folderName/Wavefront_heart",bbox_inches = "tight")
+    close(wave_plot)
     # save the ECG
-    if typeECG == "beam"
-        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
+    if typeECG == "beam" # TODO
+        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,1,amountCalcs)
         png(ecg_plot,"$folderName/EG_beam.png")
         println("\nEG succesfully saved to $folderName/EG_beam.png")
     elseif typeECG == "heart3"
-        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
-        png(ecg_plot,"$folderName/ECG3_heart.png")
+        ECGstruct.plot[1].savefig("$folderName/ECG3_heart.png",bbox_inches = "tight")
         println("\n3-lead ECG succesfully saved to $folderName/ECG3_heart.png")
+        close(ECGstruct.plot[1])
     elseif typeECG == "heart12"
-        ecg_plot = plotECG(ECGstruct,celAutom,x_ax,amountCalcs)
-        for plot in ecg_plot
-            display(plot)
-        end
-        png(ecg_plot[1],"$folderName/ECG12_heart(1).png")
-        png(ecg_plot[2],"$folderName/ECG12_heart(2).png")
-        png(ecg_plot[3],"$folderName/ECG12_heart(3).png")
-        png(ecg_plot[4],"$folderName/ECG12_heart(4).png")
+        ECGstruct.plot[1].savefig("$folderName/ECG12_heart(1).png",bbox_inches = "tight")
+        ECGstruct.plot[2].savefig("$folderName/ECG12_heart(2).png",bbox_inches = "tight")
+        ECGstruct.plot[3].savefig("$folderName/ECG12_heart(3).png",bbox_inches = "tight")
+        ECGstruct.plot[4].savefig("$folderName/ECG12_heart(4).png",bbox_inches = "tight")
         println("\n12-lead ECG succesfully saved to \n$folderName/ECG12_heart(1).png",
                 "\n$folderName/ECG12_heart(2).png\n$folderName/ECG12_heart(3).png",
                 "\n$folderName/ECG12_heart(4).png\n")
+        for plot in ECGstruct.plot
+            display(plot)
+            close(plot)
+        end
     end
-
 end
 ##
 #   This function sets the APD of the given node. The used formula was taken
@@ -602,7 +658,7 @@ function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     if CL<300
         CL=300
     end
-    T = 1#get_prop(celAutom.mg, node, :Temp)
+    T = get_prop(celAutom.mg, node, :Temp)
 
     #epi APD
     ARI_epi = celAutom.ARI_ss_epi - celAutom.a_epi*exp(-CL/celAutom.b_epi)#Implementation formula in ms
@@ -616,6 +672,8 @@ function set_APD!(celAutom::CellulaireAutomaat, node::Int64)
     ARI = ARI_endo*(1-T) + ARI_epi*T
     set_prop!(celAutom.mg,node,:APD, ARI)
 end
+
+
 ##
 #   This function sets the CV of the given node.
 #
@@ -655,8 +713,10 @@ function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64
 end
 ##
 function main()
-    start = time()
+    start=time()
+    graph = constructGraph("data_vertices.dat", "data_edges.dat", ',')
 
+    ## vaste constanten
     #epi APD
     ARI_ss_epi = Float64(392.61)
     a_epi = Float64(339.39)
@@ -667,8 +727,6 @@ function main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
-
-
     #timestep in ms
     dt=20
     #spacestep in cm
@@ -676,63 +734,54 @@ function main()
 
     #CV_ss
     CV_ss_mps = 2 #m/s
-    CV_ss_sups = CV_ss_mps/100*δx #s.u./s
+    CV_ss_sups = CV_ss_mps*100/δx #s.u./s
     CV_ss_suptu= CV_ss_sups/dt #s.u./t.u.
 
-
-    ## balk
-    #graph = constructGraph("data_vertices_beam.dat", "data_edges_beam.dat", ',')
-    # vlakke golf balk
-    #startwaarden = get_area(graph,-10.0,-10.0,-10.0,10.0,0.0,1.0)
-    #stopwaarden = []
-    # spiraalgolf balk
-    #startwaarden=get_area(graph,0.0,0.0,0.0,10.0,0.0,1.0)
-    #stopwaarden = get_area(graph,-1.0,0.0,0.0,10.0,0.0,1.0)
-
-    #celAutom = createCellulaireAutomaat(graph,"data_tetraeder_beam_elec.dat","column_indices_beam_elec.dat",
-    #                        ',',dt, startwaarden,stopwaarden,
-    #                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo)
-
-
-    ### hart
-    graph = constructGraph("nieuwdata_vertices.dat", "nieuwdata_edges.dat", ',')
-    ## vlakke golf hart
-    startwaarden = [8427,5837]
-    stopwaarden = []#,44,74,104,134,164,194,224,254,284,314,344,374,404]
     LVexit = Int64(8427)
     RVexit = Int64(5837)
-    time_ms = Int64(20) #na 20 miliseconden moet RVexit oplichten
-    RVexit_time = Int64(ceil(time_ms/dt)) #aantal tijdstappen voordat RVexit moet oplichten.
-    ## spiraalgolf hart
-    # startwaarden = get_area(graph, -100.0,62.0, 110.0,125.0,-80.0,1000.0)
-    # stopwaarden = get_area(graph, -100.0,62.0,125.0,140.0,-80.0,1000.0)
 
-    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat","column_indices_elec.dat",
-                            ',',dt, δx,startwaarden,stopwaarden,
-                            ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
-                            LVexit, RVexit, RVexit_time, CV_ss_suptu)
+    ## vlakke golf
+    #startwaarden = []
+    #stopwaarden = []
+    #time_ms = Int64(10) #na 10 miliseconden moet RVexit oplichten
+    #RVexit_time = Int64(ceil(time_ms/dt)) #aantal tijdstappen voordat RVexit moet oplichten.
+    ## spiraal
+    startwaarden=get_area(graph, -100.0,115.0, 110.0,125.0,-1000.0,1000.0)
+    stopwaarden = get_area(graph, -100.0,115.0,125.0,140.0,-1000.0,1000.0)
+    time_ms = 0
+    RVexit_time = 0
 
 
-    folder="groepje3"
+
+
+    celAutom = createCellulaireAutomaat(graph,"data_tetraeder_elec12.dat",
+                        "column_indices_elec.dat",',', dt, δx, startwaarden,stopwaarden,
+                        ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
+                        LVexit, RVexit, RVexit_time, CV_ss_suptu)
+
+    folder="plotjesSpiraal"
     dim = 2
+
     amountCalcs = 100
-    amountFrames = 100
+    amountFrames = 50
     amountECG = 50
-    typeECG = "heart263"
+    typeECG = "heart12"
 
     println("\n#####################################################################")
-    println("δt = ", celAutom.δt, " ms\nδx = ",celAutom.δx, "\nARI_ss_epi = ",
+    println("δt = ", celAutom.δt, " ms\nδx = ",celAutom.δx, " cm\nARI_ss_epi = ",
         celAutom.ARI_ss_epi,"\nARI_ss_endo = ", celAutom.ARI_ss_endo, "\na_epi = ",
         celAutom.a_epi, "\na_endo = ", celAutom.a_endo, "\nb_epi = ", celAutom.b_epi,
-        "\nb_endo = ", celAutom.b_endo,"\nstartwaarden = ",startwaarden,"\nstopwaarden = ",stopwaarden,
-        "\namountCalcs = ",amountCalcs,"\namountFrames = ",amountFrames,"\namountECG = ",amountECG,
-        "\nType of ECG = ",typeECG,"\nFrequency ECG = ",1/(floor(amountCalcs/amountECG)*dt)," Hz")
-    println("#####################################################################")
-    println("Situation initialized, start cellular automaton now...")
+        "\nb_endo = ", celAutom.b_endo,"\nSteady State CV = ",CV_ss_mps," m/s (",
+        CV_ss_suptu," s.u./t.u.)\nLVexit = ",LVexit,"\nRVexit = ",RVexit,
+        "\nRVexit_time = ",time_ms," ms (",RVexit_time," t.u.)\nstartwaarden = ",
+        startwaarden,"\nstopwaarden = ",stopwaarden,"\namountCalcs = ",amountCalcs,
+        "\namountFrames = ",amountFrames,"\namountECG = ",amountECG,"\nType of ECG = ",typeECG)
+    println("#####################################################################\n")
+    println("Situation initialized, start cellular automaton now...\n")
 
-    createFrames(folder,amountFrames,amountCalcs,amountECG,typeECG,celAutom,dim)
+    createFrames(folder,amountFrames,amountCalcs,amountECG,typeECG,celAutom, dim)
     elapsed = time() - start
-    println("Duration simulation: ",elapsed, "\n")
+    println("Duration simulation: ",elapsed, " s\n")
 end
 
 main()
