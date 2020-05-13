@@ -461,12 +461,12 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
             #anders problemen met edges
-            if !(buur in startwaarden) &&!(buur in stopwaarden) #&&!(buur==RVexit) && !(buur == LVexit)
+            if !(buur in startwaarden) &&!(buur in stopwaarden) #&&!(buur==RVexit) && !(buur == LVexit) #comment last two for spiral
                 enqueue!(Priority,(node, buur),0)
             end
         end
     end
-    #for buur in collect(neighbors(graph, LVexit))
+    #for buur in collect(neighbors(graph, LVexit)) #comment for spiral
         #anders problemen met edges
 #        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
 #            enqueue!(Priority,(LVexit, buur),0)
@@ -746,8 +746,8 @@ function main()
     #time_ms = Int64(10) #na 10 miliseconden moet RVexit oplichten
     #RVexit_time = Int64(ceil(time_ms/dt)) #aantal tijdstappen voordat RVexit moet oplichten.
     ## spiraal
-    startwaarden=get_area(graph, -100.0,105.0, 110.0,125.0,-1000.0,1000.0)
-    stopwaarden = get_area(graph, -100.0,105.0,125.0,140.0,-1000.0,1000.0)
+    startwaarden=get_area(graph, -100.0,115.0, 110.0,125.0,-1000.0,1000.0)
+    stopwaarden = get_area(graph, -100.0,115.0,125.0,140.0,-1000.0,1000.0)
     time_ms = 0
     RVexit_time = 0
 
