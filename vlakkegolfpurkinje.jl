@@ -224,7 +224,12 @@ end
 #           old_conduction_fraction + CV*ani/dx
 function makeTransition!(celAutom::CellulaireAutomaat)
     for key in keys(celAutom.edgesA)
-        CV = get_prop(celAutom.mg, key[1], :CV)
+        if (get_prop(celAutom.mg, key[1],:celtype)==2) && (get_prop(celAutom.mg, key[2], :celtype)==2)
+            CV = celAutom.CV_ss
+            # print("CV purkinje is $CV and CV normal would be $(get_prop(celAutom.mg, key[1], :CV))\n")
+        else
+            CV = get_prop(celAutom.mg, key[1], :CV)
+        end
         ani = get_prop(celAutom.mg, key[1], key[2], :anisotropy)
         dx = get_prop(celAutom.mg, key[1],key[2],:dx)
         celAutom.edgesA[key]+= CV*ani/dx
@@ -290,7 +295,14 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         #properties of current edge
         dx=get_prop(celAutom.mg, key[1],key[2],:dx)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
-        CV=get_prop(celAutom.mg,key[1],:CV)
+        #If its purkinje channel
+        if (get_prop(celAutom.mg, key[1],:celtype)==2) && (get_prop(celAutom.mg, key[2], :celtype)==2)
+            CV = celAutom.CV_ss
+            # print("CV purkinje is $CV and CV normal would be $(get_prop(celAutom.mg, key[1], :CV))\n")
+        #if not
+        else
+            CV = get_prop(celAutom.mg, key[1], :CV)
+        end
         #fraction of the time step to get to the node
         timeFraction=1-(surplus*dx)/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
@@ -307,7 +319,14 @@ function handleSurplus(celAutom::CellulaireAutomaat)
                     #get different properties of new edge
                     dx2=get_prop(celAutom.mg, key[2],node,:dx)
                     ani2=get_prop(celAutom.mg,key[2],node,:anisotropy)
-                    CV2=get_prop(celAutom.mg,key[2],:CV)
+                    #If its purkinje channel
+                    if (get_prop(celAutom.mg, key[2],:celtype)==2) && (get_prop(celAutom.mg, node, :celtype)==2)
+                        CV2 = celAutom.CV_ss
+                        # print("CV purkinje is $CV2 and CV normal would be $(get_prop(celAutom.mg, key[2], :CV))\n")
+                        #if not
+                    else
+                        CV2 = get_prop(celAutom.mg, key[2], :CV)
+                    end
                     #calculate the new transition
                     newTransition = surplus*dx/dx2*ani2/ani*CV2/CV
                     #set the transition on the max of the current and new transition
@@ -687,8 +706,11 @@ function main()
 
     #CV_ss
     CV_ss_mps = 2 #m/s
-    CV_ss_sups = CV_ss_mps*100*δx #s.u./s
-    CV_ss_suptu= CV_ss_sups/dt #s.u./t.u.
+    CV_ss_cmps = CV_ss_mps*100 #cm/s
+    CV_ss_cmptu=CV_ss_cmps*dt/1000#transition to cm/t.u.
+    CV_ss_suptu=CV_ss_cmptu/δx#transition to s.u./t.u.
+    # println("CV_ss is nu $CV_ss_suptu")
+
 
     LVexit = Int64(8427)
     RVexit = Int64(5837)
@@ -699,7 +721,7 @@ function main()
                         ARI_ss_endo, ARI_ss_epi, a_epi, a_endo, b_epi, b_endo,
                         LVexit, RVexit, RVexit_time, CV_ss_suptu)
 
-    folder="plotjesvlakgeenpurkinjexz"
+    folder="plotjesvlakpurkinjexz"
 
     dim = 2
     createFrames(folder,30,30,celAutom, dim)

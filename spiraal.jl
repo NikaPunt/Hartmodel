@@ -294,7 +294,13 @@ function handleSurplus(celAutom::CellulaireAutomaat)
         #properties of current edge
         dx=get_prop(celAutom.mg, key[1],key[2],:dx)
         ani=get_prop(celAutom.mg,key[1],key[2],:anisotropy)
-        CV=get_prop(celAutom.mg,key[1],:CV)
+        #If its purkinje channel
+        if (get_prop(celAutom.mg, key[1],:celtype)==2) && (get_prop(celAutom.mg, key[2], :celtype)==2)
+            CV = celAutom.CV_ss
+        #if not
+        else
+            CV = get_prop(celAutom.mg, key[1], :CV)
+        end
         #fraction of the time step to get to the node
         timeFraction=1-(surplus*dx)/(CV*ani)
         if canPassCurrentTo(celAutom, key[2],timeFraction)
@@ -311,7 +317,13 @@ function handleSurplus(celAutom::CellulaireAutomaat)
                     #get different properties of new edge
                     dx2=get_prop(celAutom.mg, key[2],node,:dx)
                     ani2=get_prop(celAutom.mg,key[2],node,:anisotropy)
-                    CV2=get_prop(celAutom.mg,key[2],:CV)
+                    #If its purkinje channel
+                    if (get_prop(celAutom.mg, key[2],:celtype)==2) && (get_prop(celAutom.mg, node, :celtype)==2)
+                        CV2 = celAutom.CV_ss
+                    #if not
+                    else
+                        CV2 = get_prop(celAutom.mg, key[2], :CV)
+                    end
                     #calculate the new transition
                     newTransition = surplus*dx/dx2*ani2/ani*CV2/CV
                     #set the transition on the max of the current and new transition
