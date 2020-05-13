@@ -718,7 +718,7 @@ function main()
     amountCalcs = 100
     amountFrames = 100
     amountECG = 50
-    typeECG = "heart12"
+    typeECG = "heart263"
 
     println("\n#####################################################################")
     println("δt = ", celAutom.δt, " ms\nδx = ",celAutom.δx, "\nARI_ss_epi = ",

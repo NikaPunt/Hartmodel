@@ -13,6 +13,8 @@ mutable struct ECG
       type::String # "beam","heart3","heart12"
       elec::Dict{String,Array{Float64,1}}
       lead::Dict{String,Array{Float64,1}}
+      loc_elec::Array{Float64,2}
+      name_elec::Array{String,1}
       wavefront::Array{Float64,1}
       n_calcs::Int64
       p_0::Float64
@@ -533,6 +535,13 @@ end
 
 
 """
+"""
+function ecg263!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
+      get_potential!(ECGstruct,celAutom)
+end
+
+
+"""
     initializeECG(type::String,amountCalcs::Int64)
 Makes an array in which the data on the ECG is stored. The number of columns
 is equal to the number of leads. Each row wil contain the value of the ECG in a
@@ -551,6 +560,7 @@ certain time step. The difference in time between the rows is celAutom.δt.
 function initializeECG(t::String,amountCalcs::Int64,celAutom::CellulaireAutomaat)
       elec_init = Dict{String,Array{Float64,1}}()
       lead_init = Dict{String,Array{Float64,1}}()
+      loc_elec = zeros(Float64,3,1)
 
       if t == "beam"
             name_elecs = ["1","2"]
@@ -561,10 +571,14 @@ function initializeECG(t::String,amountCalcs::Int64,celAutom::CellulaireAutomaat
       elseif t == "heart12"
             name_elecs = ["RA","LA","LL","V1","V2","V3","V4","V5","V6"]
             name_leads = ["I","II","III","aVL","aVR","aVF","V1","V2","V3","V4","V5","V6"]
+      elseif t == "heart263"
+            (loc_elec,name_elecs) = readdlm("electrode_pos.dat",',',header=true)
+            name_elecs = reshape(collect(String,name_elecs),263)
+            name_leads = cat(name_elecs[1:260],["I","II","III"],dims=1) # exclude LL, LA and RA
       end
 
-      for name in name_elecs
-            elec_init[name] = float(zeros(amountCalcs))
+      for i = 1:length(name_elecs)
+            elec_init[name_elecs[i]] = float(zeros(amountCalcs))
       end
 
       for lead in name_leads
@@ -588,7 +602,7 @@ function initializeECG(t::String,amountCalcs::Int64,celAutom::CellulaireAutomaat
       #println("p = ",p,"\nsom = ",sum(p),"\nlengte = ",length(p))
 
 
-      return ECG((type=t,elec=elec_init,lead=lead_init,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs,p_0=p_0,p=p)...)
+      return ECG((type=t,elec=elec_init,lead=lead_init,loc_elec=loc_elec,name_elec=name_elecs,wavefront=float(zeros(amountCalcs)),n_calcs=amountCalcs,p_0=p_0,p=p)...)
 end
 
 
@@ -601,8 +615,11 @@ function updateECG!(ECGstruct::ECG,celAutom::CellulaireAutomaat)
             ecg3!(ECGstruct,celAutom)
       elseif ECGstruct.type == "heart12"
             ecg12!(ECGstruct,celAutom)
+      elseif ECGstruct.type == "heart263"
+            ecg263!(ECGstruct,celAutom)
       end
 end
+
 
 """
 """
@@ -645,5 +662,18 @@ function plotECG(ECGstruct::ECG,celAutom::CellulaireAutomaat,x_ax::Array{Int64,1
             # we chose to visualise only the 3-lead ecg in runtime, for displaying all 12
             # lead potentials in one plot would not be clear.
             return ecg_plot
+      elseif ECGstruct.type == "heart263"
+            c_elec = zeros(length(ECGstruct.name_elecs))
+            for i in range(1,length(ECGstruct.name_elecs))
+                  c_elec[i] = ECGstruct.elec[ECGstruct.name_elecs[i]][celAutom.time]
+            end
+            x = ECGstruct.loc_elecs[1,:]
+            y = ECGstruct.loc_elecs[2,:]
+            z = ECGstruct.loc_elecs[3,:]
+            plot_pot = scatter(x=x,y=y,z=z,mode="markers",
+                        marker=attr(cmin=minimum(c_elec), cmax=maximum(c_elec), color=c_elec, colorscale="Bluered"))
+            display(plot_pot)
+            tu = celAutom.time
+            png(plot_pot,"groepje3/heart263/body_surface$tu.png")
       end
 end
