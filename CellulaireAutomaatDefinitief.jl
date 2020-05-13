@@ -461,17 +461,17 @@ function createCellulaireAutomaat(graph::MetaGraph, filename_tetrahedrons::Strin
     for node in startwaarden
         for buur in collect(neighbors(graph, node))
             #anders problemen met edges
-            if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
+            if !(buur in startwaarden) &&!(buur in stopwaarden) #&&!(buur==RVexit) && !(buur == LVexit)
                 enqueue!(Priority,(node, buur),0)
             end
         end
     end
-    for buur in collect(neighbors(graph, LVexit))
+    #for buur in collect(neighbors(graph, LVexit))
         #anders problemen met edges
-        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
-            enqueue!(Priority,(LVexit, buur),0)
-        end
-    end
+#        if !(buur in startwaarden) && !(buur == LVexit) &&!(buur in stopwaarden) &&!(buur==RVexit)
+#            enqueue!(Priority,(LVexit, buur),0)
+#        end
+#    end
     celAutom = CellulaireAutomaat((mg=graph,heart=input_heart,indices_elec=dict_elec,time=1,
                                 δt=dt,δx=δx, ARI_ss_endo=ARI_ss_endo,
                                 ARI_ss_epi=ARI_ss_epi, a_epi=a_epi, a_endo=a_endo,
@@ -734,7 +734,7 @@ function main()
 
     #CV_ss
     CV_ss_mps = 2 #m/s
-    CV_ss_sups = CV_ss_mps/100*δx #s.u./s
+    CV_ss_sups = CV_ss_mps*100/δx #s.u./s
     CV_ss_suptu= CV_ss_sups/dt #s.u./t.u.
 
     LVexit = Int64(8427)
