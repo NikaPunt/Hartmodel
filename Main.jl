@@ -1,10 +1,10 @@
 include("CellularAutomaton.jl")
-function Main()
+function MainFunction()
     start=time()
     graph = constructGraph("data_vertices.dat", "data_edges.dat", ',')
 
-    startwaarden=get_area(graph, -100.0,115.0, 110.0,125.0,-1000.0,1000.0)
-    stopwaarden = get_area(graph, -100.0,115.0,125.0,140.0,-1000.0,1000.0)
+    startwaarden=[]#get_area(graph, -100.0,115.0, 110.0,125.0,-1000.0,1000.0)
+    stopwaarden =[]# get_area(graph, -100.0,115.0,125.0,140.0,-1000.0,1000.0)
 
 
     #epi APD
@@ -17,34 +17,35 @@ function Main()
     a_endo = Float64(485.4)
     b_endo = Float64(501)
 
+    #Steady state value of CV
+    CV_SS = 70.03
+
     #timestep in ms
-    dt=20
+    δt=20
     #spacestep in cm
     δx = 1/10
 
-    #CV_purkinje
-    CV_purkinje_mps = 2 #m/s
-    CV_purkinje_sups = CV_purkinje_mps*100/δx #s.u./s
-    CV_purkinje_suptu= CV_purkinje_sups/dt #s.u./t.u.
+    #the multiplier for the CV
+    purkinje_CV_multiplier = Float64(2)
 
     LVexit = Int64(8427)
     RVexit = Int64(5837)
     time_ms = Int64(20) #na 20 miliseconden moet RVexit oplichten
-    RVexit_time = Int64(ceil(time_ms/dt)) #aantal tijdstappen voordat RVexit moet oplichten.
+    RVexit_time = Int64(ceil(time_ms/δt)) #aantal tijdstappen voordat RVexit moet oplichten.
     purkinjeflag = true
 
     variable_APD_flag = true
 
-    celAutom = createCellulaireAutomaat(graph, dt, δx, startwaarden,stopwaarden,
+    celAutom = createCellularAutomaton(graph, δt, δx, startwaarden,stopwaarden,
                         APD_ss_endo, APD_ss_epi, a_epi, a_endo, b_epi, b_endo,
-                        LVexit, RVexit, RVexit_time, CV_purkinje_suptu,
-                        purkinjeflag, variable_APD_flag)
+                        LVexit, RVexit, RVexit_time, purkinje_CV_multiplier,
+                        CV_SS, purkinjeflag, variable_APD_flag)
 
     folder="plotjesxyDiepte"
 
-    createFrames(folder,100,100,celAutom)
+    createFrames(folder,40,40,celAutom)
     elapsed = time() - start
     println(elapsed)
 end
 
-Main()
+MainFunction()

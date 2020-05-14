@@ -16,6 +16,7 @@ using Images
 using Plots
 using GraphRecipes
 # theme(:juno)
+include("CellularAutomatonMutableStruct.jl")
 
 ##
 # function that returns the coordinates of the vertices.
@@ -35,11 +36,11 @@ function get_coordinates(mg::MetaGraph)
 end
 ##
 #   plotGraph2 uses the MetaGraph object embedded in the given
-#   CellulaireAutomaat object (celAutom) to create an image of the (colored)
+#   CellularAutomaton object (celAutom) to create an image of the (colored)
 #   MetaGraph object.
 #
-#   @param  (CellulaireAutomaat) celAutom
-#           An object of the class CellulaireAutomaat that carries an object of
+#   @param  (CellularAutomaton) celAutom
+#           An object of the class CellularAutomaton that carries an object of
 #           type MetaGraph.
 #   @param  (Int64) i
 #           This is the number assigned to the end of the name of the
@@ -51,7 +52,7 @@ end
 #   @post   Generates an image of the colored MetaGraph object using the gplot
 #           function and stored as $folder/frame$i.png.
 #   @post   this will generate a plot of a 2D graph.
-function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
+function plotGraph2(celAutom::CellularAutomaton,i::Int64,folder::String)
     nodefillc = coloringNodes(celAutom)
     edgefillc =coloringEdge(celAutom)
     loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
@@ -60,17 +61,17 @@ function plotGraph2(celAutom::CellulaireAutomaat,i::Int64,folder::String)
 end
 ##
 #   coloringNodes will return an array of colors that can color the nodes of
-#   the MetaGraph embedded in the given CellulaireAutomaat. This array can be
+#   the MetaGraph embedded in the given CellularAutomaton. This array can be
 #   used as the nodefillc array used in the gplot function.
 #
-#   @param  (CellulaireAutomaat) celAutom
-#           An object of the class CellulaireAutomaat that carries an object of
+#   @param  (CellularAutomaton) celAutom
+#           An object of the class CellularAutomaton that carries an object of
 #           type MetaGraph.
 #   @post   nodefillc will assign the color "black" to nodes in state one,
 #           "maroon" to nodes in state two and "red4" to nodes in state three.
 #   @return Returns "nodefillc", an array of type Array{RGB{Normed{UInt8, 8}},1}
 #           with the needed coloring for the gplot function.
-function coloringNodes(celAutom::CellulaireAutomaat)
+function coloringNodes(celAutom::CellularAutomaton)
     nodecolor = [colorant"black", colorant"firebrick",colorant"blue"]
     #,colorant"darkred",colorant"firebrick4",colorant"firebrick",colorant"orangered3",colorant"orangered",colorant"darkorange1",colorant"orange",colorant"darkgoldenrod2",colorant"darkgoldenrod1",colorant"goldenrod1",colorant"gold",colorant"yellow2", colorant"yellow"]
     #nv = number of vertices
@@ -82,11 +83,11 @@ function coloringNodes(celAutom::CellulaireAutomaat)
 end
 ##
 #   coloringEdge will return an array of colors that can color the edges of
-#   the MetaGraph embedded in the given CellulaireAutomaat. This array can be
+#   the MetaGraph embedded in the given CellularAutomaton. This array can be
 #   used as the edgestrokec array used in the gplot function.
 #
-#   @param  (CellulaireAutomaat) celAutom
-#           An object of the class CellulaireAutomaat that carries an object of
+#   @param  (CellularAutomaton) celAutom
+#           An object of the class CellularAutomaton that carries an object of
 #           type MetaGraph.
 #   @post   The edges will be colored in a spectrum from white (not excited at all)
 #           to dark red (completely excited),
@@ -94,7 +95,7 @@ end
 #           Edges recovering from excitation will be colored green.
 #   @return Returns colors, an array of type Array{RGB{Normed{UInt8, 8}},1}
 #           with the needed coloring for the gplot function.
-function coloringEdge(celAutom::CellulaireAutomaat)
+function coloringEdge(celAutom::CellularAutomaton)
     edgecolor = [colorant"black", colorant"red"]
     #ne = number of edges
     membership=ones(Int64,ne(celAutom.mg))
