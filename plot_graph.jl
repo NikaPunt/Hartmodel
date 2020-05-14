@@ -52,11 +52,20 @@ end
 #   @post   Generates an image of the colored MetaGraph object using the gplot
 #           function and stored as $folder/frame$i.png.
 #   @post   this will generate a plot of a 2D graph.
+#   @post   If celAutom.aanzicht == 1, the xy plane will be plotted.
+#           If celAutom.aanzicht == 2, the xz plane will be plotted.
+#           If celAutom.aanzicht == 3, the yz plane will be plotted.
 function plotGraph2(celAutom::CellularAutomaton,i::Int64,folder::String)
     nodefillc = coloringNodes(celAutom)
     edgefillc =coloringEdge(celAutom)
     loc_x,loc_y,loc_z = get_coordinates(celAutom.mg)
-    g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+    if celAutom.aanzicht == 1
+        g1=gplot(celAutom.mg,loc_x,loc_y,nodefillc=nodefillc,edgestrokec=edgefillc)
+    elseif celAutom.aanzicht == 2
+        g1=gplot(celAutom.mg,loc_x,loc_z,nodefillc=nodefillc,edgestrokec=edgefillc)
+    else
+        g1=gplot(celAutom.mg,loc_y,loc_z,nodefillc=nodefillc,edgestrokec=edgefillc)
+    end
     draw(PNG("$folder/frame$i.png", 16cm, 16cm), g1)
 end
 ##
