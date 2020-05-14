@@ -1,6 +1,7 @@
 include("CellularAutomaton.jl")
 function MainFunction()
     start=time()
+    println("##########################################################")
     graph = constructGraph("data_vertices.dat", "data_edges.dat", ',')
 
     startwaarden=[]#get_area(graph, -100.0,115.0, 110.0,125.0,-1000.0,1000.0)
@@ -16,6 +17,10 @@ function MainFunction()
     APD_ss_endo = Float64(505.74)
     a_endo = Float64(485.4)
     b_endo = Float64(501)
+
+                    #1: xy
+    aanzicht = 2    #2: xz
+                    #3: yz
 
     #Steady state value of CV
     CV_SS = 70.03
@@ -39,13 +44,15 @@ function MainFunction()
     celAutom = createCellularAutomaton(graph, δt, δx, startwaarden,stopwaarden,
                         APD_ss_endo, APD_ss_epi, a_epi, a_endo, b_epi, b_endo,
                         LVexit, RVexit, RVexit_time, purkinje_CV_multiplier,
-                        CV_SS, purkinjeflag, variable_APD_flag)
+                        CV_SS, purkinjeflag, variable_APD_flag, aanzicht)
 
-    folder="plotjesxyDiepte"
+    folder="plotjesxz"
 
     createFrames(folder,40,40,celAutom)
     elapsed = time() - start
-    println(elapsed)
+    println("##########################################################")
+    println("Done!")
+    println("Runtime: $elapsed")
 end
 
 MainFunction()
