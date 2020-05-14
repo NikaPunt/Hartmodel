@@ -165,3 +165,23 @@ function constructGraph(filename_vertices::String,filename_edges::String,delimit
     println("Graph check!")
     return mg
 end
+##
+# function that returns the indices of the vertices that span the
+# range/area specified by the inputs.
+#
+#   @param (Metagraph) object
+#   @param the range specified by x_start, x_stop, y_start, y_stop, z_start, z_stop
+#   @return array I of indices of vertices
+function get_area(g::MetaGraph,x_start::Float64,x_stop::Float64,y_start::Float64,y_stop::Float64,z_start::Float64,z_stop::Float64)
+    I = []
+    for i in range(1,stop=nv(g))
+         if x_start <= get_prop(g,i,:loc_x) <= x_stop
+             if y_start <= get_prop(g,i,:loc_y) <= y_stop
+                 if z_start <= get_prop(g,i,:loc_z) <= z_stop
+                     append!(I, i)
+                 end
+             end
+         end
+    end
+    return I
+end
